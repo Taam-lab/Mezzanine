@@ -105,6 +105,12 @@ function relevanceScore(text: string): number {
   return (text.match(/전환|사채|발행|이자율|만기|전환가|납입/g) ?? []).length;
 }
 
+// 본문(상세 발행조건)에만 등장하는 키워드 — TOC/메뉴와 구별용
+function isRealContent(text: string): boolean {
+  const strong = (text.match(/이자율|만기일|납입일|전환가액|전환청구|행사가액|표면금리|수익률|사채의\s*권면/g) ?? []).length;
+  return strong >= 3 && text.length >= 500;
+}
+
 // ──────────────────────────────────────────────
 // DART Open API document fetch
 // ──────────────────────────────────────────────
@@ -189,39 +195,19 @@ async function fetchDartTextViaScraping(rcpNo: string): Promise<{ text: string; 
   const setCookie = mainRes.headers.get("set-cookie");
   if (setCookie) headers["Cookie"] = setCookie.split(";")[0];
 
-  // If main page itself has disclosure content, use it
+  // main.do는 frameset/TOC 페이지 — 본문이 충분히 들어있는 경우에만 직접 채택
   const mainText = htmlToText(mainHtml);
-  if (relevanceScore(mainText) >= 5) return { text: mainText, debugInfo: "main.do 직접 파싱" };
+  if (isRealContent(mainText)) return { text: mainText, debugInfo: "main.do 직접 파싱" };
 
   const docUrls = new Set<string>();
+  const dcmNos = new Set<string>();
   const debugLines: string[] = [];
 
-  // Look for any frame/iframe src attributes
-  for (const m of mainHtml.matchAll(/<(?:frame|iframe)[^>]+src=["']([^"']+)["']/gi)) {
-    const u = m[1].replace(/&amp;/g, "&").trim();
-    if (u && !u.startsWith("javascript") && u !== "about:blank" && u !== "") {
-      const full = u.startsWith("http") ? u : `${base}${u}`;
-      docUrls.add(full);
-      debugLines.push(`frame: ${full}`);
-    }
-  }
+  // ───── main.do에서 dcmNo / URL 패턴 추출 ─────
+  collectDocPatterns(mainHtml, base, rcpNo, docUrls, dcmNos, debugLines, "main");
 
-  // viewer.do URLs anywhere in the page
-  for (const m of mainHtml.matchAll(/["']([^"']*viewer\.do\?[^"']*)["']/gi)) {
-    const u = m[1].replace(/&amp;/g, "&");
-    const full = u.startsWith("http") ? u : `${base}${u}`;
-    docUrls.add(full);
-    debugLines.push(`viewer: ${full}`);
-  }
-
-  // dcmNo in JS variables → construct viewer URL
-  for (const m of mainHtml.matchAll(/['"]?dcmNo['"]?\s*[:=,]\s*['"]?(\d{7,12})['"]?/gi)) {
-    const url = `${base}/report/viewer.do?rcpNo=${rcpNo}&dcmNo=${m[1]}&eleId=0&offset=0&length=0&dtd=dart3.xsd`;
-    docUrls.add(url);
-    debugLines.push(`dcmNo(main): ${m[1]}`);
-  }
-
-  // Try sub.do (document index sidebar)
+  // ───── sub.do (좌측 트리/문서 인덱스) ─────
+  let subHtml = "";
   try {
     const subUrl = `${base}/dsaf001/sub.do?rcpNo=${rcpNo}`;
     const subRes = await fetch(subUrl, {
@@ -229,69 +215,44 @@ async function fetchDartTextViaScraping(rcpNo: string): Promise<{ text: string; 
       headers: { ...headers, Referer: mainUrl },
     });
     if (subRes.ok) {
-      const subHtml = await subRes.text();
-      debugLines.push(`sub.do: ${subHtml.length}bytes`);
-
-      // sub.do content itself
+      subHtml = await subRes.text();
+      debugLines.push(`sub.do=${subHtml.length}b`);
       const subText = htmlToText(subHtml);
-      if (relevanceScore(subText) >= 5) return { text: subText, debugInfo: "sub.do 직접 파싱" };
-
-      // viewer.do URLs in sub.do
-      for (const m of subHtml.matchAll(/["']([^"']*viewer\.do\?[^"']*)["']/gi)) {
-        const u = m[1].replace(/&amp;/g, "&");
-        docUrls.add(u.startsWith("http") ? u : `${base}${u}`);
-      }
-
-      // JS function calls: goView('dcmNo', ...) / fn_view('dcmNo', ...) etc.
-      for (const m of subHtml.matchAll(/(?:goView|viewDoc|fn_view|openDoc|viewReport)\s*\(\s*['"]?(\d{7,12})['"]?/gi)) {
-        const url = `${base}/report/viewer.do?rcpNo=${rcpNo}&dcmNo=${m[1]}&eleId=0&offset=0&length=0&dtd=dart3.xsd`;
-        docUrls.add(url);
-        debugLines.push(`goView dcmNo: ${m[1]}`);
-      }
-
-      // data-dcm attributes
-      for (const m of subHtml.matchAll(/data-(?:dcm|dcmno|dcm-no)=["'](\d{7,12})["']/gi)) {
-        const url = `${base}/report/viewer.do?rcpNo=${rcpNo}&dcmNo=${m[1]}&eleId=0&offset=0&length=0&dtd=dart3.xsd`;
-        docUrls.add(url);
-        debugLines.push(`data-dcm: ${m[1]}`);
-      }
-
-      // dcmNo in JS variables
-      for (const m of subHtml.matchAll(/['"]?dcmNo['"]?\s*[:=,]\s*['"]?(\d{7,12})['"]?/gi)) {
-        const url = `${base}/report/viewer.do?rcpNo=${rcpNo}&dcmNo=${m[1]}&eleId=0&offset=0&length=0&dtd=dart3.xsd`;
-        docUrls.add(url);
-        debugLines.push(`dcmNo(sub): ${m[1]}`);
-      }
-
-      // href links that look like document pages
-      for (const m of subHtml.matchAll(/href=["']([^"']+\.html?)["']/gi)) {
-        const u = m[1].replace(/&amp;/g, "&");
-        docUrls.add(u.startsWith("http") ? u : `${base}${u}`);
-      }
+      if (isRealContent(subText)) return { text: subText, debugInfo: `sub.do 직접 파싱 | ${debugLines.join(",")}` };
+      collectDocPatterns(subHtml, base, rcpNo, docUrls, dcmNos, debugLines, "sub");
     } else {
       debugLines.push(`sub.do HTTP ${subRes.status}`);
     }
   } catch (e) {
-    debugLines.push(`sub.do error: ${e}`);
+    debugLines.push(`sub.do err: ${String(e).slice(0, 50)}`);
   }
 
-  const debugStr = debugLines.join(" | ") || "no patterns found";
+  // 추출된 dcmNo로 viewer.do URL 구성 (eleId 다양화)
+  for (const dcm of dcmNos) {
+    for (const eleId of ["0", "1", "2"]) {
+      docUrls.add(`${base}/report/viewer.do?rcpNo=${rcpNo}&dcmNo=${dcm}&eleId=${eleId}&offset=0&length=0&dtd=dart3.xsd`);
+    }
+  }
+
+  const debugStr = debugLines.join(" | ") + ` | dcmNos=[${[...dcmNos].join(",")}]`;
 
   if (docUrls.size === 0) {
-    const snippet = mainHtml.slice(0, 400).replace(/\s+/g, " ");
-    throw new Error(`URL 없음 [${debugStr}] 페이지: ${snippet}`);
+    // 본문 URL을 못 찾으면 HTML 원본 일부를 디버그에 노출
+    const snippet = (subHtml || mainHtml).slice(0, 800).replace(/[\s\n\r]+/g, " ");
+    throw new Error(`본문 URL 추출 실패 [${debugStr}] | HTML: ${snippet}`);
   }
 
   let bestText = "";
-  const triedUrls: string[] = [];
-  for (const docUrl of [...docUrls].slice(0, 8)) {
-    triedUrls.push(docUrl);
+  let bestScore = 0;
+  const tried: string[] = [];
+  for (const docUrl of [...docUrls].slice(0, 12)) {
     try {
       const r = await fetch(docUrl, {
-        signal: AbortSignal.timeout(10000),
+        signal: AbortSignal.timeout(8000),
         headers: { ...headers, Referer: mainUrl },
       });
-      if (!r.ok) { triedUrls[triedUrls.length - 1] += `(${r.status})`; continue; }
+      tried.push(`${docUrl.slice(-60)}=${r.status}`);
+      if (!r.ok) continue;
 
       const ct = r.headers.get("content-type") ?? "";
       let html: string;
@@ -301,14 +262,67 @@ async function fetchDartTextViaScraping(rcpNo: string): Promise<{ text: string; 
         html = await r.text();
       }
       const text = htmlToText(html);
-      if (relevanceScore(text) > relevanceScore(bestText)) bestText = text;
+      const score = relevanceScore(text);
+      if (score > bestScore && text.length > 200) {
+        bestScore = score;
+        bestText = text;
+      }
     } catch { continue; }
   }
 
-  if (!bestText || bestText.length < 100) {
-    throw new Error(`내용 없음. 시도: ${triedUrls.slice(0, 3).join(", ")}`);
+  if (!bestText || bestText.length < 200) {
+    throw new Error(`본문 내용 없음 [${debugStr}] 시도: ${tried.slice(0, 4).join(" / ")}`);
   }
-  return { text: bestText, debugInfo: debugStr };
+  return { text: bestText, debugInfo: `${debugStr} | best=${bestScore}점` };
+}
+
+// HTML에서 dcmNo 및 본문 URL 후보를 폭넓게 수집
+function collectDocPatterns(
+  html: string,
+  base: string,
+  rcpNo: string,
+  docUrls: Set<string>,
+  dcmNos: Set<string>,
+  debug: string[],
+  tag: string,
+): void {
+  let foundFrames = 0;
+  let foundDcm = 0;
+
+  // frame/iframe src
+  for (const m of html.matchAll(/<(?:frame|iframe)[^>]+src=["']([^"']+)["']/gi)) {
+    const u = m[1].replace(/&amp;/g, "&").trim();
+    if (u && !u.startsWith("javascript") && u !== "about:blank") {
+      docUrls.add(u.startsWith("http") ? u : `${base}${u.startsWith("/") ? u : "/" + u}`);
+      foundFrames++;
+    }
+  }
+
+  // 직접 viewer.do URL
+  for (const m of html.matchAll(/["'(]([^"'()]*\/report\/viewer\.do\?[^"'()]+)["')]/gi)) {
+    const u = m[1].replace(/&amp;/g, "&");
+    docUrls.add(u.startsWith("http") ? u : `${base}${u}`);
+  }
+
+  // dcmNo 추출: JS 변수, 함수 인자, hidden input, data-* 속성 등
+  const dcmPatterns = [
+    /['"]?dcmNo['"]?\s*[:=,]\s*['"]?(\d{6,12})/gi,
+    /name=["']dcmNo["']\s+value=["'](\d{6,12})["']/gi,
+    /value=["'](\d{6,12})["']\s+name=["']dcmNo["']/gi,
+    /data-(?:dcm|dcmno|dcm-no)=["'](\d{6,12})["']/gi,
+    /(?:goView|viewDoc|fn_view|openDoc|viewReport|openPdfDownload|openSelected)\s*\(\s*['"]?\d*['"]?\s*,\s*['"]?(\d{6,12})/gi,
+    /(?:goView|viewDoc|fn_view|openDoc|viewReport)\s*\(\s*['"]?(\d{6,12})/gi,
+  ];
+  for (const re of dcmPatterns) {
+    for (const m of html.matchAll(re)) {
+      if (m[1] && m[1].length >= 6) {
+        dcmNos.add(m[1]);
+        foundDcm++;
+      }
+    }
+  }
+
+  debug.push(`${tag}: frames=${foundFrames} dcm=${foundDcm}`);
 }
 
 // ──────────────────────────────────────────────
