@@ -23,6 +23,8 @@ interface ParseResult {
   data: Partial<PositionInput>;
   autoFilledFields: string[];
   failedFields: string[];
+  _debug?: string;
+  _scrapeDebug?: string;
 }
 
 function NewPositionContent() {
@@ -205,6 +207,29 @@ function NewPositionContent() {
                     <p className="text-xs text-yellow-700 mt-1">
                       미추출 항목 ({parseResult.failedFields.length}개): {parseResult.failedFields.join(", ")}
                     </p>
+                  )}
+                  {(parseResult._debug || parseResult._scrapeDebug) && (
+                    <details className="mt-2">
+                      <summary className="text-xs text-gray-600 cursor-pointer hover:text-gray-800">
+                        🔍 디버그 정보 (파싱 안 되면 펼쳐서 확인)
+                      </summary>
+                      <div className="mt-2 space-y-2">
+                        {parseResult._scrapeDebug && (
+                          <div className="text-xs bg-white p-2 rounded border border-gray-200">
+                            <p className="font-medium text-gray-700 mb-1">스크래핑 경로:</p>
+                            <p className="text-gray-600 break-all">{parseResult._scrapeDebug}</p>
+                          </div>
+                        )}
+                        {parseResult._debug && (
+                          <div className="text-xs bg-white p-2 rounded border border-gray-200">
+                            <p className="font-medium text-gray-700 mb-1">추출된 텍스트 앞부분 (500자):</p>
+                            <p className="text-gray-600 whitespace-pre-wrap break-all font-mono">
+                              {parseResult._debug}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    </details>
                   )}
                 </div>
               )}
