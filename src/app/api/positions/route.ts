@@ -55,6 +55,7 @@ export async function POST(req: NextRequest) {
         issueDate: data.issueDate ? new Date(data.issueDate) : null,
         investmentType: data.investmentType,
         investmentAmount: data.investmentAmount ? BigInt(Math.floor(data.investmentAmount)) : null,
+        issueAmount: data.issueAmount ? BigInt(Math.floor(data.issueAmount)) : null,
         maturityDate: data.maturityDate ? new Date(data.maturityDate) : null,
         couponRate: data.couponRate ?? null,
         ytm: data.ytm ?? null,

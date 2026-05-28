@@ -53,6 +53,9 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
         investmentAmount: data.investmentAmount
           ? BigInt(Math.floor(data.investmentAmount))
           : undefined,
+        issueAmount: data.issueAmount
+          ? BigInt(Math.floor(data.issueAmount))
+          : undefined,
       },
     });
 

@@ -15,6 +15,7 @@ interface ParsedDisclosure {
   mezzanineType?: string;
   issueDate?: string;
   maturityDate?: string;
+  issueAmount?: number;
   couponRate?: number;
   ytm?: number;
   initialConversionPrice?: number;
@@ -345,7 +346,12 @@ function extractAmount(text: string, patterns: string[]): number | undefined {
     const idx = text.search(new RegExp(pat, "i"));
     if (idx === -1) continue;
     const slice = text.slice(idx, idx + 200);
-    const m = slice.match(/([\d,]+)\s*원/);
+    // "5,000원" 또는 "(원/주) 5,000" 또는 "(원) 25,000,000,000" 다양한 형식
+    const m =
+      slice.match(/([\d,]+)\s*원/) ??
+      slice.match(/\(원[/／주\s]*\)\s*([\d,]+)/) ??
+      slice.match(/\(원\)\s*([\d,]+)/) ??
+      slice.match(/[：:]\s*([\d,]{3,})/);
     if (m) {
       const val = parseFloat(m[1].replace(/,/g, ""));
       if (!isNaN(val) && val > 0) return val;
@@ -366,7 +372,7 @@ function extractPercent(text: string, patterns: string[]): number | undefined {
 }
 
 function extractTicker(text: string): string | undefined {
-  for (const pat of ["종목코드", "주권\\s*종목코드", "상장\\s*종목코드"]) {
+  for (const pat of ["종목코드", "주권\\s*종목코드", "상장\\s*종목코드", "단축코드"]) {
     const idx = text.search(new RegExp(pat, "i"));
     if (idx === -1) continue;
     const m = text.slice(idx, idx + 60).match(/\b(\d{6})\b/);
@@ -376,13 +382,48 @@ function extractTicker(text: string): string | undefined {
 }
 
 function extractCompanyName(text: string): string | undefined {
-  for (const pat of ["발행\\s*회사", "회사명\\s*[：:]", "법인명\\s*[：:]"]) {
-    const idx = text.search(new RegExp(pat, "i"));
-    if (idx === -1) continue;
-    const m = text.slice(idx, idx + 80).match(/[：:]\s*((?:\(주\)|주식회사)?\s*[^\s:：,()]{2,30})/);
-    if (m) return m[1].trim();
+  // "회 사 명 : 삼보모터스 주식회사 대 표 이 사 :" 와 같이 글자 사이 공백이 들어간 형식 처리
+  const patterns = [
+    /회\s*사\s*명\s*[：:]\s*(.+?)\s+대\s*표\s*이\s*사/,
+    /회\s*사\s*명\s*[：:]\s*(.+?)(?=\s+(?:본\s*점|소\s*재|전\s*화|작\s*성|이\s*사\s*명))/,
+    /발\s*행\s*회\s*사\s*[：:]?\s*(.+?)(?=\s+(?:대\s*표|본\s*점))/,
+    /법\s*인\s*명\s*[：:]\s*(.+?)(?=\s+(?:대\s*표|본\s*점))/,
+  ];
+  for (const re of patterns) {
+    const m = text.match(re);
+    if (m) {
+      const name = m[1].trim().replace(/\s+/g, " ").slice(0, 60);
+      if (name.length >= 2) return name;
+    }
   }
   return undefined;
+}
+
+// "사채의 종류 회차 19 종류 무기명식 이권부 무보증 사모 전환사채" 형식에서
+// 회차/종류 조합으로 자산명 생성
+function buildAssetName(text: string): { assetName?: string; seriesNumber?: number } {
+  // 회차 추출
+  const seriesMatch =
+    text.match(/사채의\s*종류\s*회차\s*(\d+)/) ??
+    text.match(/제\s*(\d+)\s*회/) ??
+    text.match(/회차\s*(\d+)/);
+  const seriesNumber = seriesMatch ? parseInt(seriesMatch[1]) : undefined;
+
+  // 종류 추출 (회차 뒤 "종류 ..."에서 "전환사채/신주인수권부사채/교환사채"까지)
+  let kind: string | undefined;
+  const kindMatch = text.match(
+    /종류\s+((?:무기명식|기명식|이권부|무보증|보증|사모|공모|분리형|비분리형|\s)+(?:전환사채|신주인수권부사채|교환사채))/
+  );
+  if (kindMatch) kind = kindMatch[1].replace(/\s+/g, " ").trim();
+  else if (text.includes("전환사채")) kind = "전환사채";
+  else if (text.includes("신주인수권부사채")) kind = "신주인수권부사채";
+  else if (text.includes("교환사채")) kind = "교환사채";
+
+  let assetName: string | undefined;
+  if (seriesNumber && kind) assetName = `제${seriesNumber}회 ${kind}`;
+  else if (kind) assetName = kind;
+
+  return { assetName, seriesNumber };
 }
 
 function parseDisclosureText(
@@ -409,43 +450,47 @@ function parseDisclosureText(
   set("mezzanineType", result.mezzanineType);
 
   // 자산명 & 회차
-  const assetIdx = text.search(/사채의\s*명칭|채권의\s*명칭|발행\s*채권명/i);
-  if (assetIdx !== -1) {
-    const assetSlice = text.slice(assetIdx, assetIdx + 120);
-    const am = assetSlice.match(/[：:]\s*([^\n:：]{4,80})/) ??
-               assetSlice.match(/명칭\s+([^\n:：]{4,80})/);
-    if (am) {
-      const name = am[1].trim().slice(0, 200);
-      result.assetName = name;
-      autoFilled.push("assetName");
-      const sm = name.match(/제\s*(\d+)\s*회/);
-      set("seriesNumber", sm ? parseInt(sm[1]) : undefined);
-    } else {
-      failed.push("assetName"); failed.push("seriesNumber");
-    }
-  } else {
-    failed.push("assetName"); failed.push("seriesNumber");
-  }
+  const { assetName, seriesNumber } = buildAssetName(text);
+  set("assetName", assetName);
+  set("seriesNumber", seriesNumber);
 
   set("underlyingCompanyName", extractCompanyName(text));
   set("underlyingTicker", extractTicker(text));
 
-  set("issueDate",    extractDate(text, ["납입일", "발행일", "사채발행일"]));
+  set("issueDate",    extractDate(text, ["납입일", "사채발행일", "발행일"]));
   set("maturityDate", extractDate(text, ["만기일", "사채의\\s*만기", "상환\\s*만기"]));
 
+  // 발행총액: "사채의 권면(전자등록)총액 (원) 25,000,000,000"
+  set("issueAmount", extractAmount(text, [
+    "사채의\\s*권면.{0,30}총액",
+    "권면\\s*총액",
+    "발행\\s*총액",
+    "사채\\s*총액",
+  ]));
+
   set("couponRate", extractPercent(text, ["표면이자율", "표면\\s*금리", "쿠폰이자율", "이표이자율"]));
-  set("ytm",        extractPercent(text, ["만기보장수익률", "만기\\s*수익률", "YTM", "복리수익률"]));
+  set("ytm",        extractPercent(text, ["만기이자율", "만기보장수익률", "만기\\s*수익률", "YTM", "복리수익률", "보장수익률"]));
 
   set("initialConversionPrice", extractAmount(text, [
-    "전환가액\\s*[：:]", "전환\\s*가액\\s*[：:]", "행사가액\\s*[：:]", "전환가액",
+    "전환가액\\s*\\(원[/／주\\s]*\\)",
+    "행사가액\\s*\\(원[/／주\\s]*\\)",
+    "전환가액\\s*[：:]",
+    "행사가액\\s*[：:]",
+    "전환가액",
+    "행사가액",
   ]));
   set("minConversionPrice", extractAmount(text, [
-    "전환가액의?\\s*조정.{0,60}최저", "리픽싱.{0,60}최저",
-    "최저\\s*전환가", "하한가", "최저한도",
+    "전환가액의?\\s*조정.{0,80}최저",
+    "조정\\s*최저.{0,30}전환가",
+    "최저\\s*조정가액",
+    "리픽싱.{0,80}최저",
+    "최저\\s*전환가",
+    "전환가액\\s*조정한도",
+    "하한가",
   ]));
 
   // 전환청구기간
-  const cvIdx = text.search(/전환청구기간|전환가능기간|전환권\s*행사기간/i);
+  const cvIdx = text.search(/전환청구기간|전환가능기간|전환권\s*행사기간|전환청구\s*기간/i);
   if (cvIdx !== -1) {
     const cvSlice = text.slice(cvIdx, cvIdx + 300);
     const dates: string[] = [];
@@ -461,10 +506,10 @@ function parseDisclosureText(
   }
 
   set("putOptionRate", extractPercent(text, [
-    "조기상환청구.{0,100}수익률", "풋옵션.{0,100}수익률", "조기상환\\s*수익률",
+    "조기상환청구.{0,100}수익률", "풋옵션.{0,100}수익률", "조기상환\\s*수익률", "풋옵션\\s*이자율",
   ]));
   set("callOptionRatio", extractPercent(text, [
-    "매도청구권.{0,100}비율", "콜옵션.{0,100}비율",
+    "매도청구권.{0,100}비율", "콜옵션.{0,100}비율", "매도청구\\s*비율",
   ]));
   set("callOptionRate", extractPercent(text, [
     "매도청구권.{0,100}수익률", "콜옵션.{0,100}수익률", "매도청구\\s*수익률",
@@ -540,7 +585,8 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       ...result,
-      _debug: text.slice(0, 500),
+      _debug: text.slice(0, 1500),
+      _textLength: text.length,
       _scrapeDebug: scrapeDebug || undefined,
     });
   } catch (err) {

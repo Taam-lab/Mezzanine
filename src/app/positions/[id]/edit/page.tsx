@@ -44,6 +44,7 @@ export default function EditPositionPage() {
           callOptionStartDate: data.callOptionStartDate ? data.callOptionStartDate.split("T")[0] : "",
           callOptionEndDate: data.callOptionEndDate ? data.callOptionEndDate.split("T")[0] : "",
           investmentAmount: data.investmentAmount ? Number(data.investmentAmount) : undefined,
+          issueAmount: data.issueAmount ? Number(data.issueAmount) : undefined,
         });
         setLoading(false);
       });
@@ -109,6 +110,7 @@ export default function EditPositionPage() {
                 {...register("investmentType")}
               />
               <Input label="투자금액 (원)" type="number" {...register("investmentAmount", { valueAsNumber: true })} />
+              <Input label="발행총액 (원)" type="number" {...register("issueAmount", { valueAsNumber: true })} />
             </CardContent>
           </Card>
 

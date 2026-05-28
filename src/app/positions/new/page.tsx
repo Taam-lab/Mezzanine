@@ -24,6 +24,7 @@ interface ParseResult {
   autoFilledFields: string[];
   failedFields: string[];
   _debug?: string;
+  _textLength?: number;
   _scrapeDebug?: string;
 }
 
@@ -222,8 +223,10 @@ function NewPositionContent() {
                         )}
                         {parseResult._debug && (
                           <div className="text-xs bg-white p-2 rounded border border-gray-200">
-                            <p className="font-medium text-gray-700 mb-1">추출된 텍스트 앞부분 (500자):</p>
-                            <p className="text-gray-600 whitespace-pre-wrap break-all font-mono">
+                            <p className="font-medium text-gray-700 mb-1">
+                              추출된 텍스트 (앞 1500자 / 총 {parseResult._textLength?.toLocaleString() ?? "?"}자):
+                            </p>
+                            <p className="text-gray-600 whitespace-pre-wrap break-all font-mono max-h-96 overflow-y-auto">
                               {parseResult._debug}
                             </p>
                           </div>
@@ -345,6 +348,15 @@ function NewPositionContent() {
                   hint="직접 입력 필수 항목"
                   error={errors.investmentAmount?.message}
                   {...register("investmentAmount", { valueAsNumber: true })}
+                />
+                <Input
+                  id="issueAmount"
+                  type="number"
+                  label="발행총액 (원)"
+                  placeholder="25000000000"
+                  autoFilled={isAutoFilled("issueAmount")}
+                  error={errors.issueAmount?.message}
+                  {...register("issueAmount", { valueAsNumber: true })}
                 />
               </CardContent>
             </Card>

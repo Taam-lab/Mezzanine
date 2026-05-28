@@ -39,6 +39,7 @@ model Position {
   issueDate              DateTime? @map("issue_date")
   investmentType         String    @default("DIRECT") @map("investment_type")
   investmentAmount       BigInt?   @map("investment_amount")
+  issueAmount            BigInt?   @map("issue_amount")
   maturityDate           DateTime? @map("maturity_date")
   couponRate             Float?    @map("coupon_rate")
   ytm                    Float?

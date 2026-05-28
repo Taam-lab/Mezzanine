@@ -36,6 +36,7 @@ export const positionSchema = z.object({
   issueDate: z.string().optional(),
   investmentType: z.enum(["DIRECT", "INDIRECT"]),
   investmentAmount: z.number().positive("투자금액은 0보다 커야 합니다.").optional(),
+  issueAmount: z.number().positive("발행총액은 0보다 커야 합니다.").optional(),
   maturityDate: z.string().optional(),
   couponRate: z.number().min(0).max(100).optional(),
   ytm: z.number().min(0).max(100).optional(),
