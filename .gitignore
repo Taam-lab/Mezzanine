@@ -31,3 +31,4 @@ __pycache__/
 .venv/
 venv/
 worker/__pycache__/
+tsconfig.tsbuildinfo
