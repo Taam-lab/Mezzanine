@@ -98,7 +98,9 @@ async function fetchDartList(rcpNo: string, apiKey: string): Promise<DartListIte
   if (data.status && data.status !== "000") {
     throw new Error(`list.json: ${data.status} ${data.message ?? ""}`);
   }
-  return data.list?.[0] ?? null;
+  if (!data.list?.length) return null;
+  // rcept_no가 정확히 일치하는 항목 우선, 없으면 첫 번째 (API가 주변 공시를 함께 반환할 수 있음)
+  return data.list.find((item) => item.rcept_no === rcpNo) ?? data.list[0];
 }
 
 /**
