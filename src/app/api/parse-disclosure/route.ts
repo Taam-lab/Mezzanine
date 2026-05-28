@@ -560,7 +560,11 @@ function parseDisclosureText(
   // ── 풋옵션 (조기상환청구) ──
   const putIdx = text.search(/조기상환\s*(?:청구|요구)\s*(?:기간|기일)|풋옵션.*기간/i);
   if (putIdx !== -1) {
-    const putSlice = text.slice(putIdx, putIdx + 500);
+    // 다음 번호 항목(매도청구권 등) 직전에서 잘라 오염 방지
+    const afterPut = text.slice(putIdx + 20);
+    const nextSecRel = afterPut.search(/\d{1,2}\.\s*(?:매도|콜옵션|사채의\s*[^전]|기타|이자지급|원금)/i);
+    const windowLen = nextSecRel !== -1 ? Math.min(nextSecRel + 20, 700) : 400;
+    const putSlice = text.slice(putIdx, putIdx + 20 + windowLen);
     const putDates = extractAllDates(putSlice);
     set("putOptionStartDate", putDates[0]);
     set("putOptionEndDate",   putDates.length > 1 ? putDates[putDates.length - 1] : undefined);
@@ -573,10 +577,11 @@ function parseDisclosureText(
   ]));
 
   // ── 콜옵션 (매도청구권) ──
-  // 매도청구권 섹션 전체를 슬라이스해서 날짜·비율·금리 일괄 추출
-  const callSecIdx = text.search(/매도청구권|Call\s*Option/i);
+  // "11. 매도청구권" 또는 "매도청구권(Call Option)" 형태의 섹션 헤더를 찾음
+  // — 리픽싱 조항에 흘러나오는 단순 "매도청구권" 언급에 끌려가지 않도록 구체 패턴 사용
+  const callSecIdx = text.search(/\d{1,2}\.\s*매도청구권|매도청구권\s*[\(（]\s*Call\s*Option/i);
   if (callSecIdx !== -1) {
-    const callSec = text.slice(callSecIdx, callSecIdx + 1500);
+    const callSec = text.slice(callSecIdx, callSecIdx + 2000);
 
     // 날짜: "매매대금 지급기일" 이후 날짜들
     const callDatesIdx = callSec.search(/매매대금\s*지급\s*기일|납입\s*기일/i);
@@ -588,8 +593,9 @@ function parseDisclosureText(
       failed.push("callOptionStartDate"); failed.push("callOptionEndDate");
     }
 
-    // 콜옵션 비율: "사채 권면총액의 N%" / "잔액의 N%" / "행사가능 범위 N%"
+    // 콜옵션 비율: "행사 범위" / "행사 가능 범위" / "권면총액의 N%"
     const ratioMatch =
+      callSec.match(/행사\s*(?:가능\s*)?범위[^%\n]{0,80}([\d.]+)\s*%/) ??
       callSec.match(/(?:권면총액|잔액|원금).{0,20}의?\s*([\d.]+)\s*%/) ??
       callSec.match(/행사\s*가능.{0,30}([\d.]+)\s*%/);
     set("callOptionRatio", ratioMatch ? parseFloat(ratioMatch[1]) : undefined);
@@ -679,16 +685,19 @@ export async function POST(req: NextRequest) {
 
     const result = parseDisclosureText(text, url);
 
-    // 텍스트 파싱에서 못 가져온 종목코드를 list.json 결과로 보완
-    if (!result.data.underlyingTicker && apiTicker) {
+    // list.json 종목코드는 텍스트 파싱보다 신뢰성 높으므로 항상 우선 사용
+    if (apiTicker) {
       result.data.underlyingTicker = apiTicker;
-      result.autoFilledFields.push("underlyingTicker");
+      if (!result.autoFilledFields.includes("underlyingTicker")) {
+        result.autoFilledFields.push("underlyingTicker");
+      }
       result.failedFields = result.failedFields.filter(f => f !== "underlyingTicker");
     }
 
     return NextResponse.json({
       ...result,
       _debug: text.slice(0, 1500),
+      _debug2: text.slice(4000, 7000),
       _textLength: text.length,
       _scrapeDebug: scrapeDebug || undefined,
     });
