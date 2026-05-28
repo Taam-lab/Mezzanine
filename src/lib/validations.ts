@@ -1,13 +1,14 @@
 import { z } from "zod";
 
-const ALLOWED_DOMAINS = (process.env.ALLOWED_DOMAINS || "miraeasset.com").split(",");
-
 export const signupSchema = z.object({
   email: z
     .string()
     .email("올바른 이메일 형식이 아닙니다.")
     .refine(
-      (email) => ALLOWED_DOMAINS.some((d) => email.endsWith("@" + d.trim())),
+      (email) => {
+        const allowed = (process.env.ALLOWED_DOMAINS || "miraeasset.com").split(",");
+        return allowed.some((d) => email.endsWith("@" + d.trim()));
+      },
       "미래에셋 이메일(@miraeasset.com)로만 가입 가능합니다."
     ),
   name: z.string().min(2, "이름은 2자 이상이어야 합니다.").max(50),
