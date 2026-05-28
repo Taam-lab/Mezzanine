@@ -23,9 +23,8 @@ interface ParseResult {
   data: Partial<PositionInput>;
   autoFilledFields: string[];
   failedFields: string[];
-  _debug?: string;
-  _textLength?: number;
-  _scrapeDebug?: string;
+  _meta?: Record<string, unknown>;
+  _rawDecision?: Record<string, unknown>;
 }
 
 function NewPositionContent() {
@@ -74,13 +73,10 @@ function NewPositionContent() {
         return;
       }
 
-      // 디버그: 추출된 원문 텍스트 확인용
-      if (data._debug) console.log("[DART parse] extracted text:", data._debug);
+      if (data._rawDecision) console.log("[DART parse] raw decision:", data._rawDecision);
 
       if (!data.data || data.autoFilledFields?.length === 0) {
-        setParseError(
-          `파싱 성공했지만 추출된 필드가 없습니다.\n추출 텍스트 앞부분: ${data._debug ?? "(없음)"}`
-        );
+        setParseError("파싱 성공했지만 추출된 필드가 없습니다.");
         return;
       }
 
@@ -209,26 +205,26 @@ function NewPositionContent() {
                       미추출 항목 ({parseResult.failedFields.length}개): {parseResult.failedFields.join(", ")}
                     </p>
                   )}
-                  {(parseResult._debug || parseResult._scrapeDebug) && (
+                  {(parseResult._rawDecision || parseResult._meta) && (
                     <details className="mt-2">
                       <summary className="text-xs text-gray-600 cursor-pointer hover:text-gray-800">
-                        🔍 디버그 정보 (파싱 안 되면 펼쳐서 확인)
+                        DART 정형 API 응답 보기
                       </summary>
                       <div className="mt-2 space-y-2">
-                        {parseResult._scrapeDebug && (
+                        {parseResult._meta && (
                           <div className="text-xs bg-white p-2 rounded border border-gray-200">
-                            <p className="font-medium text-gray-700 mb-1">스크래핑 경로:</p>
-                            <p className="text-gray-600 break-all">{parseResult._scrapeDebug}</p>
+                            <p className="font-medium text-gray-700 mb-1">공시 메타 (list.json):</p>
+                            <pre className="text-gray-600 whitespace-pre-wrap break-all font-mono">
+                              {JSON.stringify(parseResult._meta, null, 2)}
+                            </pre>
                           </div>
                         )}
-                        {parseResult._debug && (
+                        {parseResult._rawDecision && (
                           <div className="text-xs bg-white p-2 rounded border border-gray-200">
-                            <p className="font-medium text-gray-700 mb-1">
-                              추출된 텍스트 (앞 1500자 / 총 {parseResult._textLength?.toLocaleString() ?? "?"}자):
-                            </p>
-                            <p className="text-gray-600 whitespace-pre-wrap break-all font-mono max-h-96 overflow-y-auto">
-                              {parseResult._debug}
-                            </p>
+                            <p className="font-medium text-gray-700 mb-1">정형 발행결정 데이터 (raw):</p>
+                            <pre className="text-gray-600 whitespace-pre-wrap break-all font-mono max-h-96 overflow-y-auto">
+                              {JSON.stringify(parseResult._rawDecision, null, 2)}
+                            </pre>
                           </div>
                         )}
                       </div>
