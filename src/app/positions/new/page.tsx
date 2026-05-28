@@ -71,8 +71,17 @@ function NewPositionContent() {
         return;
       }
 
+      // 디버그: 추출된 원문 텍스트 확인용
+      if (data._debug) console.log("[DART parse] extracted text:", data._debug);
+
+      if (!data.data || data.autoFilledFields?.length === 0) {
+        setParseError(
+          `파싱 성공했지만 추출된 필드가 없습니다.\n추출 텍스트 앞부분: ${data._debug ?? "(없음)"}`
+        );
+        return;
+      }
+
       setParseResult(data);
-      // 폼에 자동 채우기
       Object.entries(data.data).forEach(([key, value]) => {
         if (value !== undefined && value !== null) {
           setValue(key as keyof PositionInput, value as never);

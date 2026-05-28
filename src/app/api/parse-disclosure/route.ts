@@ -133,7 +133,10 @@ async function fetchDartTextViaApi(rcpNo: string, apiKey: string): Promise<strin
   const htmlEntries = entries.filter(
     (e) => e.name.toLowerCase().endsWith(".htm") || e.name.toLowerCase().endsWith(".html")
   );
-  if (htmlEntries.length === 0) throw new Error("ZIP contains no HTML files");
+  if (htmlEntries.length === 0) {
+    const names = entries.map((e) => e.name).join(", ");
+    throw new Error(`ZIP에 HTML 파일 없음. 포함된 파일: ${names || "(없음)"}`);
+  }
 
   let bestText = "";
   for (const entry of htmlEntries) {
@@ -348,32 +351,28 @@ export async function POST(req: NextRequest) {
     try {
       text = await fetchDartTextViaApi(rcpNo, apiKey);
     } catch (err) {
-      console.error("[parse-disclosure] DART API error:", err);
+      const msg = err instanceof Error ? err.message : "알 수 없는 오류";
+      console.error("[parse-disclosure] DART API error:", msg);
       return NextResponse.json(
-        {
-          error: `DART 문서를 가져오는데 실패했습니다: ${err instanceof Error ? err.message : "알 수 없는 오류"}`,
-          data: {},
-          autoFilledFields: [],
-          failedFields: [],
-        },
-        { status: 200 }
+        { error: `DART 문서 다운로드 실패: ${msg}` },
+        { status: 502 }
       );
     }
 
     if (!text || text.length < 50) {
       return NextResponse.json(
-        {
-          error: "공시 내용을 읽을 수 없습니다. DART 사이트에서 직접 확인해주세요.",
-          data: {},
-          autoFilledFields: [],
-          failedFields: [],
-        },
-        { status: 200 }
+        { error: "공시 내용을 읽을 수 없습니다. ZIP 안에 HTML 파일이 없거나 내용이 비어있습니다." },
+        { status: 422 }
       );
     }
 
     const result = parseDisclosureText(text, url);
-    return NextResponse.json(result);
+
+    // 개발 디버그: 추출된 텍스트 앞부분을 함께 반환 (파싱 검증용)
+    return NextResponse.json({
+      ...result,
+      _debug: text.slice(0, 500),
+    });
   } catch (err) {
     console.error("[parse-disclosure]", err);
     return NextResponse.json({ error: "파싱 중 오류가 발생했습니다." }, { status: 500 });
