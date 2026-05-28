@@ -1,5 +1,11 @@
 import { PrismaClient } from "@prisma/client";
 
+// BigInt → JSON 직렬화: Prisma가 BigInt를 반환하면 NextResponse.json이 깨지므로
+// 글로벌로 toJSON을 정의 (문자열로 직렬화)
+(BigInt.prototype as unknown as { toJSON: () => string }).toJSON = function () {
+  return this.toString();
+};
+
 const globalForPrisma = globalThis as unknown as { prisma: PrismaClient | undefined };
 
 function createPrismaClient(): PrismaClient {
