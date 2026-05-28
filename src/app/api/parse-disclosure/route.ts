@@ -23,8 +23,12 @@ interface ParsedDisclosure {
   conversionStartDate?: string;
   conversionEndDate?: string;
   putOptionRate?: number;
+  putOptionStartDate?: string;
+  putOptionEndDate?: string;
   callOptionRatio?: number;
   callOptionRate?: number;
+  callOptionStartDate?: string;
+  callOptionEndDate?: string;
   seriesNumber?: number;
   sourceDisclosureUrl?: string;
 }
@@ -110,6 +114,23 @@ function relevanceScore(text: string): number {
 function isRealContent(text: string): boolean {
   const strong = (text.match(/이자율|만기일|납입일|전환가액|전환청구|행사가액|표면금리|수익률|사채의\s*권면/g) ?? []).length;
   return strong >= 3 && text.length >= 500;
+}
+
+// ──────────────────────────────────────────────
+// DART Open API – list.json으로 종목코드 조회
+// ──────────────────────────────────────────────
+
+async function fetchTickerFromDart(rcpNo: string, apiKey: string): Promise<string | null> {
+  try {
+    const url = `https://opendart.fss.or.kr/api/list.json?crtfc_key=${apiKey}&rcept_no=${rcpNo}`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    if (!res.ok) return null;
+    const data = await res.json() as { status?: string; list?: Array<{ stock_code?: string }> };
+    const code = data.list?.[0]?.stock_code?.trim();
+    return (code && /^\d{6}$/.test(code)) ? code : null;
+  } catch {
+    return null;
+  }
 }
 
 // ──────────────────────────────────────────────
@@ -360,13 +381,30 @@ function extractAmount(text: string, patterns: string[]): number | undefined {
   return undefined;
 }
 
+function extractAllDates(text: string): string[] {
+  const dates: string[] = [];
+  const re = /(\d{4})[년\-./][\s]*(\d{1,2})[월\-./][\s]*(\d{1,2})/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    dates.push(`${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`);
+  }
+  return dates;
+}
+
 function extractPercent(text: string, patterns: string[]): number | undefined {
   for (const pat of patterns) {
     const idx = text.search(new RegExp(pat, "i"));
     if (idx === -1) continue;
-    const slice = text.slice(idx, idx + 120);
-    const m = slice.match(/([\d.]+)\s*%/);
-    if (m) return parseFloat(m[1]);
+    const slice = text.slice(idx, idx + 150);
+    // "(%) 4.0" 형식 — DART 표 형식에서 단위 먼저, 값 나중
+    const m2 = slice.match(/\(%\)\s*([\d.]+)/);
+    // "4.0%" 형식 — 일반 문장 형식
+    const m1 = slice.match(/([\d.]+)\s*%/);
+    if (m2 && m1) {
+      return parseFloat(slice.indexOf(m2[0]) <= slice.indexOf(m1[0]) ? m2[1] : m1[1]);
+    }
+    if (m2) return parseFloat(m2[1]);
+    if (m1) return parseFloat(m1[1]);
   }
   return undefined;
 }
@@ -381,6 +419,13 @@ function extractTicker(text: string): string | undefined {
   return undefined;
 }
 
+function cleanCompanyName(raw: string): string {
+  return raw
+    .replace(/\s*(주식회사|㈜|\(주\)|\(株\)|유한회사|합자회사)\s*/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function extractCompanyName(text: string): string | undefined {
   // "회 사 명 : 삼보모터스 주식회사 대 표 이 사 :" 와 같이 글자 사이 공백이 들어간 형식 처리
   const patterns = [
@@ -392,7 +437,8 @@ function extractCompanyName(text: string): string | undefined {
   for (const re of patterns) {
     const m = text.match(re);
     if (m) {
-      const name = m[1].trim().replace(/\s+/g, " ").slice(0, 60);
+      const raw = m[1].trim().replace(/\s+/g, " ").slice(0, 60);
+      const name = cleanCompanyName(raw);
       if (name.length >= 2) return name;
     }
   }
@@ -457,10 +503,22 @@ function parseDisclosureText(
   set("underlyingCompanyName", extractCompanyName(text));
   set("underlyingTicker", extractTicker(text));
 
-  set("issueDate",    extractDate(text, ["납입일", "사채발행일", "발행일"]));
-  set("maturityDate", extractDate(text, ["만기일", "사채의\\s*만기", "상환\\s*만기"]));
+  // 발행일: 반드시 번호 항목 "12. 납입일" 형식 우선 — "납입기일" 등에 끌려가지 않도록
+  set("issueDate", extractDate(text, [
+    "\\d+\\.\\s*납입일",
+    "납입일\\s*[：:]",
+    "사채발행일",
+  ]));
 
-  // 발행총액: "사채의 권면(전자등록)총액 (원) 25,000,000,000"
+  // 만기일: "5. 사채만기일" 형식 우선
+  set("maturityDate", extractDate(text, [
+    "\\d+\\.\\s*사채만기일",
+    "사채만기일",
+    "만기일\\s*[：:]",
+    "상환\\s*만기",
+  ]));
+
+  // 발행총액
   set("issueAmount", extractAmount(text, [
     "사채의\\s*권면.{0,30}총액",
     "권면\\s*총액",
@@ -490,30 +548,62 @@ function parseDisclosureText(
   ]));
 
   // 전환청구기간
-  const cvIdx = text.search(/전환청구기간|전환가능기간|전환권\s*행사기간|전환청구\s*기간/i);
+  const cvIdx = text.search(/전환청구기간|전환가능기간|전환권\s*행사기간/i);
   if (cvIdx !== -1) {
-    const cvSlice = text.slice(cvIdx, cvIdx + 300);
-    const dates: string[] = [];
-    const dateRe = /(\d{4})[년\-./][\s]*(\d{1,2})[월\-./][\s]*(\d{1,2})/g;
-    let dm: RegExpExecArray | null;
-    while ((dm = dateRe.exec(cvSlice)) !== null) {
-      dates.push(`${dm[1]}-${dm[2].padStart(2,"0")}-${dm[3].padStart(2,"0")}`);
-    }
-    set("conversionStartDate", dates[0]);
-    set("conversionEndDate",   dates.length > 1 ? dates[dates.length - 1] : undefined);
+    const cvDates = extractAllDates(text.slice(cvIdx, cvIdx + 300));
+    set("conversionStartDate", cvDates[0]);
+    set("conversionEndDate",   cvDates.length > 1 ? cvDates[cvDates.length - 1] : undefined);
   } else {
     failed.push("conversionStartDate"); failed.push("conversionEndDate");
   }
 
+  // ── 풋옵션 (조기상환청구) ──
+  const putIdx = text.search(/조기상환\s*(?:청구|요구)\s*(?:기간|기일)|풋옵션.*기간/i);
+  if (putIdx !== -1) {
+    const putSlice = text.slice(putIdx, putIdx + 500);
+    const putDates = extractAllDates(putSlice);
+    set("putOptionStartDate", putDates[0]);
+    set("putOptionEndDate",   putDates.length > 1 ? putDates[putDates.length - 1] : undefined);
+  } else {
+    failed.push("putOptionStartDate"); failed.push("putOptionEndDate");
+  }
   set("putOptionRate", extractPercent(text, [
-    "조기상환청구.{0,100}수익률", "풋옵션.{0,100}수익률", "조기상환\\s*수익률", "풋옵션\\s*이자율",
+    "조기상환청구.{0,100}수익률", "조기상환.{0,50}이율",
+    "풋옵션.{0,100}수익률", "조기상환\\s*수익률",
   ]));
-  set("callOptionRatio", extractPercent(text, [
-    "매도청구권.{0,100}비율", "콜옵션.{0,100}비율", "매도청구\\s*비율",
-  ]));
-  set("callOptionRate", extractPercent(text, [
-    "매도청구권.{0,100}수익률", "콜옵션.{0,100}수익률", "매도청구\\s*수익률",
-  ]));
+
+  // ── 콜옵션 (매도청구권) ──
+  // 매도청구권 섹션 전체를 슬라이스해서 날짜·비율·금리 일괄 추출
+  const callSecIdx = text.search(/매도청구권|Call\s*Option/i);
+  if (callSecIdx !== -1) {
+    const callSec = text.slice(callSecIdx, callSecIdx + 1500);
+
+    // 날짜: "매매대금 지급기일" 이후 날짜들
+    const callDatesIdx = callSec.search(/매매대금\s*지급\s*기일|납입\s*기일/i);
+    if (callDatesIdx !== -1) {
+      const callDates = extractAllDates(callSec.slice(callDatesIdx, callDatesIdx + 800));
+      set("callOptionStartDate", callDates[0]);
+      set("callOptionEndDate",   callDates.length > 1 ? callDates[callDates.length - 1] : undefined);
+    } else {
+      failed.push("callOptionStartDate"); failed.push("callOptionEndDate");
+    }
+
+    // 콜옵션 비율: "사채 권면총액의 N%" / "잔액의 N%" / "행사가능 범위 N%"
+    const ratioMatch =
+      callSec.match(/(?:권면총액|잔액|원금).{0,20}의?\s*([\d.]+)\s*%/) ??
+      callSec.match(/행사\s*가능.{0,30}([\d.]+)\s*%/);
+    set("callOptionRatio", ratioMatch ? parseFloat(ratioMatch[1]) : undefined);
+
+    // 콜옵션 금리: "매매가액 원금의 N%" 에서 N을 rate로
+    const rateMatch =
+      callSec.match(/매매가액[^%\n]{0,50}([\d.]+)\s*%/) ??
+      callSec.match(/매매\s*가액.{0,30}원금의?\s*([\d.]+)/);
+    set("callOptionRate", rateMatch ? parseFloat(rateMatch[1]) : undefined);
+  } else {
+    failed.push("callOptionStartDate"); failed.push("callOptionEndDate");
+    set("callOptionRatio", undefined);
+    set("callOptionRate", undefined);
+  }
 
   return { data: result, autoFilledFields: autoFilled, failedFields: failed };
 }
@@ -550,23 +640,29 @@ export async function POST(req: NextRequest) {
     let lastError = "";
     let scrapeDebug = "";
 
-    // 1차: DART Open API (ZIP 다운로드)
     const apiKey = process.env.DART_API_KEY;
-    if (apiKey) {
-      try {
-        text = await fetchDartTextViaApi(rcpNo, apiKey);
-      } catch (err) {
-        lastError = err instanceof Error ? err.message : String(err);
-        console.error("[parse-disclosure] DART API failed:", lastError.slice(0, 200));
-      }
+
+    // 1차: DART Open API (ZIP 다운로드) + 종목코드 조회를 병렬로
+    const [docResult, tickerResult] = await Promise.allSettled([
+      apiKey ? fetchDartTextViaApi(rcpNo, apiKey) : Promise.reject("no key"),
+      apiKey ? fetchTickerFromDart(rcpNo, apiKey) : Promise.resolve(null),
+    ]);
+
+    if (docResult.status === "fulfilled") {
+      text = docResult.value;
+    } else {
+      lastError = String(docResult.reason).slice(0, 200);
+      console.error("[parse-disclosure] DART API failed:", lastError);
     }
+
+    const apiTicker = tickerResult.status === "fulfilled" ? tickerResult.value : null;
 
     // 2차: 공개 DART 뷰어 스크래핑 (API 실패 시 폴백)
     if (!text || text.length < 50) {
       try {
-        const result = await fetchDartTextViaScraping(rcpNo);
-        text = result.text;
-        scrapeDebug = result.debugInfo;
+        const scraped = await fetchDartTextViaScraping(rcpNo);
+        text = scraped.text;
+        scrapeDebug = scraped.debugInfo;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error("[parse-disclosure] Scraping failed:", msg.slice(0, 300));
@@ -582,6 +678,13 @@ export async function POST(req: NextRequest) {
     }
 
     const result = parseDisclosureText(text, url);
+
+    // 텍스트 파싱에서 못 가져온 종목코드를 list.json 결과로 보완
+    if (!result.data.underlyingTicker && apiTicker) {
+      result.data.underlyingTicker = apiTicker;
+      result.autoFilledFields.push("underlyingTicker");
+      result.failedFields = result.failedFields.filter(f => f !== "underlyingTicker");
+    }
 
     return NextResponse.json({
       ...result,
