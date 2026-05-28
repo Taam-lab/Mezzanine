@@ -1,12 +1,12 @@
 "use client";
 
-import { useSession, signOut } from "next-auth/react";
 import { Bell, ChevronDown, LogOut, User } from "lucide-react";
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 export function Header() {
-  const { data: session } = useSession();
+  const router = useRouter();
   const [unreadCount, setUnreadCount] = useState(0);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
 
@@ -17,9 +17,13 @@ export function Header() {
       .catch(() => {});
   }, []);
 
+  async function handleLogout() {
+    await fetch("/api/auth/logout", { method: "POST" });
+    router.push("/login");
+  }
+
   return (
     <header className="fixed top-0 left-60 right-0 h-14 bg-white border-b border-gray-200 flex items-center px-6 gap-4 z-20">
-      {/* 검색 */}
       <div className="flex-1 max-w-md">
         <input
           type="text"
@@ -29,7 +33,6 @@ export function Header() {
       </div>
 
       <div className="flex items-center gap-3 ml-auto">
-        {/* 알림 벨 */}
         <Link href="/alerts" className="relative p-2 rounded-lg hover:bg-gray-100 transition-colors">
           <Bell className="h-5 w-5 text-gray-600" />
           {unreadCount > 0 && (
@@ -39,7 +42,6 @@ export function Header() {
           )}
         </Link>
 
-        {/* 사용자 메뉴 */}
         <div className="relative">
           <button
             onClick={() => setUserMenuOpen(!userMenuOpen)}
@@ -48,31 +50,16 @@ export function Header() {
             <div className="w-7 h-7 rounded-full bg-[#0A2A5E] flex items-center justify-center">
               <User className="h-4 w-4 text-white" />
             </div>
-            <span className="text-sm font-medium text-gray-700">{session?.user?.name || "사용자"}</span>
+            <span className="text-sm font-medium text-gray-700">관리자</span>
             <ChevronDown className="h-4 w-4 text-gray-400" />
           </button>
 
           {userMenuOpen && (
             <>
-              <div
-                className="fixed inset-0 z-10"
-                onClick={() => setUserMenuOpen(false)}
-              />
-              <div className="absolute right-0 top-full mt-1 w-48 bg-white border border-gray-200 rounded-xl shadow-lg z-20 overflow-hidden">
-                <div className="px-4 py-3 border-b border-gray-100">
-                  <p className="text-sm font-medium text-gray-900">{session?.user?.name}</p>
-                  <p className="text-xs text-gray-500 truncate">{session?.user?.email}</p>
-                </div>
-                <Link
-                  href="/settings/account"
-                  className="flex items-center gap-2 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50"
-                  onClick={() => setUserMenuOpen(false)}
-                >
-                  <User className="h-4 w-4" />
-                  계정 설정
-                </Link>
+              <div className="fixed inset-0 z-10" onClick={() => setUserMenuOpen(false)} />
+              <div className="absolute right-0 top-full mt-1 w-40 bg-white border border-gray-200 rounded-xl shadow-lg z-20 overflow-hidden">
                 <button
-                  onClick={() => signOut({ callbackUrl: "/login" })}
+                  onClick={handleLogout}
                   className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50"
                 >
                   <LogOut className="h-4 w-4" />

@@ -1,13 +1,10 @@
 "use client";
 
-import { useSession } from "next-auth/react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { User } from "lucide-react";
 
 export default function AccountSettingsPage() {
-  const { data: session } = useSession();
-
   return (
     <AppLayout>
       <div className="max-w-2xl space-y-5">
@@ -15,7 +12,7 @@ export default function AccountSettingsPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>내 계정 정보</CardTitle>
+            <CardTitle>접속 정보</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-xl">
@@ -23,8 +20,8 @@ export default function AccountSettingsPage() {
                 <User className="h-6 w-6 text-white" />
               </div>
               <div>
-                <p className="font-medium text-gray-900">{session?.user?.name}</p>
-                <p className="text-sm text-gray-500">{session?.user?.email}</p>
+                <p className="font-medium text-gray-900">관리자</p>
+                <p className="text-sm text-gray-500">미래에셋 투자심사팀</p>
               </div>
             </div>
 
@@ -34,9 +31,9 @@ export default function AccountSettingsPage() {
                 <p className="font-medium text-gray-900">미래에셋 투자심사팀</p>
               </div>
               <div>
-                <p className="text-gray-500 text-xs mb-1">계정 상태</p>
+                <p className="text-gray-500 text-xs mb-1">접속 방식</p>
                 <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700">
-                  활성
+                  공유 비밀번호
                 </span>
               </div>
             </div>

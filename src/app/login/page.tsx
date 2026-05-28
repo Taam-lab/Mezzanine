@@ -1,15 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -20,19 +17,16 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      const result = await signIn("credentials", {
-        email,
-        password,
-        redirect: false,
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password }),
       });
 
-      if (result?.error === "PENDING_APPROVAL") {
-        router.push("/signup/pending");
-        return;
-      }
+      const data = await res.json();
 
-      if (result?.error) {
-        setError("이메일 또는 비밀번호가 올바르지 않습니다.");
+      if (!res.ok) {
+        setError(data.error || "비밀번호가 올바르지 않습니다.");
         return;
       }
 
@@ -47,7 +41,6 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-[#F5F7FA]">
       <div className="w-full max-w-sm">
-        {/* 로고 */}
         <div className="text-center mb-8">
           <div
             className="inline-flex items-center justify-center w-14 h-14 rounded-2xl text-white text-2xl font-bold mb-4"
@@ -59,24 +52,14 @@ export default function LoginPage() {
           <p className="text-gray-500 text-sm mt-1">메자닌 포지션 모니터링 시스템</p>
         </div>
 
-        {/* 로그인 폼 */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
-          <h2 className="text-lg font-semibold text-gray-900 mb-6">로그인</h2>
+          <h2 className="text-lg font-semibold text-gray-900 mb-6">접속</h2>
           <form onSubmit={handleSubmit} className="space-y-4">
-            <Input
-              id="email"
-              type="email"
-              label="이메일"
-              placeholder="name@miraeasset.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-            />
             <Input
               id="password"
               type="password"
-              label="비밀번호"
-              placeholder="비밀번호를 입력해주세요"
+              label="접속 비밀번호"
+              placeholder="비밀번호를 입력하세요"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
@@ -87,18 +70,9 @@ export default function LoginPage() {
               </div>
             )}
             <Button type="submit" className="w-full" loading={loading} size="lg">
-              로그인
+              접속
             </Button>
           </form>
-
-          <div className="mt-6 text-center">
-            <p className="text-sm text-gray-500">
-              계정이 없으신가요?{" "}
-              <Link href="/signup" className="text-[#0A2A5E] font-medium hover:underline">
-                가입 신청
-              </Link>
-            </p>
-          </div>
         </div>
 
         <p className="text-center text-xs text-gray-400 mt-6">
