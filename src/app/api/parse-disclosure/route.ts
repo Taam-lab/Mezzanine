@@ -4,6 +4,7 @@ import { promisify } from "util";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+export const maxDuration = 30;
 
 const inflateRawAsync = promisify(inflateRaw);
 
@@ -33,14 +34,13 @@ interface ParsedDisclosure {
 
 interface ZipEntry {
   name: string;
-  method: number; // 0=stored, 8=deflate
+  method: number;
   compressed: Buffer;
 }
 
 function parseZipEntries(buf: Buffer): ZipEntry[] {
   const entries: ZipEntry[] = [];
 
-  // Find End-of-Central-Directory (EOCD) signature 0x06054b50
   let eocdPos = -1;
   for (let i = buf.length - 22; i >= Math.max(0, buf.length - 65557); i--) {
     if (buf.readUInt32LE(i) === 0x06054b50) { eocdPos = i; break; }
@@ -52,21 +52,19 @@ function parseZipEntries(buf: Buffer): ZipEntry[] {
   let pos = cdOffset;
 
   for (let i = 0; i < numEntries; i++) {
-    if (buf.readUInt32LE(pos) !== 0x02014b50) break; // central dir entry sig
+    if (buf.readUInt32LE(pos) !== 0x02014b50) break;
 
-    const method       = buf.readUInt16LE(pos + 10);
-    const compSize     = buf.readUInt32LE(pos + 20);
-    const fnLen        = buf.readUInt16LE(pos + 28);
-    const extraLen     = buf.readUInt16LE(pos + 30);
-    const commentLen   = buf.readUInt16LE(pos + 32);
-    const lhOffset     = buf.readUInt32LE(pos + 42);
-    const nameBytes    = buf.slice(pos + 46, pos + 46 + fnLen);
-    // Try UTF-8, fall back to latin1 (covers EUC-KR filenames roughly)
-    const name = nameBytes.toString("utf8");
+    const method     = buf.readUInt16LE(pos + 10);
+    const compSize   = buf.readUInt32LE(pos + 20);
+    const fnLen      = buf.readUInt16LE(pos + 28);
+    const extraLen   = buf.readUInt16LE(pos + 30);
+    const commentLen = buf.readUInt16LE(pos + 32);
+    const lhOffset   = buf.readUInt32LE(pos + 42);
+    const nameBytes  = buf.slice(pos + 46, pos + 46 + fnLen);
+    const name       = nameBytes.toString("utf8");
 
     pos += 46 + fnLen + extraLen + commentLen;
 
-    // Read data from local file header
     if (buf.readUInt32LE(lhOffset) !== 0x04034b50) continue;
     const lhFnLen    = buf.readUInt16LE(lhOffset + 26);
     const lhExtraLen = buf.readUInt16LE(lhOffset + 28);
@@ -80,8 +78,8 @@ function parseZipEntries(buf: Buffer): ZipEntry[] {
 }
 
 async function extractEntry(entry: ZipEntry): Promise<Buffer> {
-  if (entry.method === 0) return entry.compressed;          // stored
-  if (entry.method === 8) return await inflateRawAsync(entry.compressed) as Buffer; // deflate
+  if (entry.method === 0) return entry.compressed;
+  if (entry.method === 8) return await inflateRawAsync(entry.compressed) as Buffer;
   throw new Error(`Unsupported ZIP method: ${entry.method}`);
 }
 
@@ -113,21 +111,31 @@ function relevanceScore(text: string): number {
 
 async function fetchDartTextViaApi(rcpNo: string, apiKey: string): Promise<string> {
   const url = `https://opendart.fss.or.kr/api/document.do?crtfc_key=${apiKey}&rcept_no=${rcpNo}`;
-  const res = await fetch(url, { signal: AbortSignal.timeout(20000) });
+  const res = await fetch(url, { signal: AbortSignal.timeout(12000) });
 
   if (!res.ok) throw new Error(`DART API HTTP ${res.status}`);
 
   const contentType = res.headers.get("content-type") ?? "";
 
-  // DART returns JSON when there's an error (e.g., invalid key, no document)
-  if (contentType.includes("json") || contentType.includes("text/html")) {
+  if (contentType.includes("json")) {
     const body = await res.text();
     let msg = "DART API error";
-    try { msg = JSON.parse(body).message ?? msg; } catch { msg = body.slice(0, 100); }
+    try { msg = JSON.parse(body).message ?? msg; } catch { msg = body.slice(0, 200); }
     throw new Error(msg);
   }
 
+  if (contentType.includes("text/html")) {
+    const body = await res.text();
+    throw new Error(body.slice(0, 300));
+  }
+
   const zipBuf = Buffer.from(await res.arrayBuffer());
+
+  // Verify ZIP magic bytes (PK signature)
+  if (zipBuf.length < 4 || zipBuf[0] !== 0x50 || zipBuf[1] !== 0x4B) {
+    throw new Error(`ZIP 형식 아님: ${zipBuf.slice(0, 80).toString("utf8")}`);
+  }
+
   const entries = parseZipEntries(zipBuf);
 
   const htmlEntries = entries.filter(
@@ -142,17 +150,12 @@ async function fetchDartTextViaApi(rcpNo: string, apiKey: string): Promise<strin
   for (const entry of htmlEntries) {
     try {
       const raw = await extractEntry(entry);
-
-      // Detect charset from HTML meta tag before full decode
       const preview = raw.slice(0, 1024).toString("latin1");
       const csMatch = preview.match(/charset[=\s"']+([a-zA-Z0-9-]+)/i);
       const charset = (csMatch?.[1] ?? "utf-8").toLowerCase().replace("-", "");
 
       let html: string;
       if (charset === "euckr" || charset === "euc_kr" || charset === "ksc5601") {
-        // Best-effort: decode as latin1 and keep parsing
-        // (iconv-lite not available; Korean may be garbled but keywords still findable
-        //  because we only use regex patterns after htmlToText anyway)
         html = raw.toString("latin1");
       } else {
         html = raw.toString("utf8");
@@ -163,6 +166,85 @@ async function fetchDartTextViaApi(rcpNo: string, apiKey: string): Promise<strin
     } catch { continue; }
   }
 
+  return bestText;
+}
+
+// ──────────────────────────────────────────────
+// DART web scraping fallback (public viewer)
+// ──────────────────────────────────────────────
+
+async function fetchDartTextViaScraping(rcpNo: string): Promise<string> {
+  const base = "https://dart.fss.or.kr";
+  const headers: Record<string, string> = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9",
+  };
+
+  // 1. Fetch main frameset page
+  const mainUrl = `${base}/dsaf001/main.do?rcpNo=${rcpNo}`;
+  const mainRes = await fetch(mainUrl, { signal: AbortSignal.timeout(10000), headers });
+  if (!mainRes.ok) throw new Error(`DART viewer HTTP ${mainRes.status}`);
+  const mainHtml = await mainRes.text();
+
+  // Collect session cookie if set
+  const setCookie = mainRes.headers.get("set-cookie");
+  if (setCookie) {
+    const cookieVal = setCookie.split(";")[0];
+    if (cookieVal) headers["Cookie"] = cookieVal;
+  }
+
+  // 2. Extract viewer.do URLs from the frameset HTML
+  const docUrls = new Set<string>();
+  for (const m of mainHtml.matchAll(/src=["']([^"']*viewer\.do[^"']*)["']/gi)) {
+    const u = m[1].replace(/&amp;/g, "&");
+    docUrls.add(u.startsWith("http") ? u : `${base}${u}`);
+  }
+
+  // 3. Check sub.do (TOC sidebar) for additional document links
+  try {
+    const subUrl = `${base}/dsaf001/sub.do?rcpNo=${rcpNo}`;
+    const subRes = await fetch(subUrl, {
+      signal: AbortSignal.timeout(8000),
+      headers: { ...headers, Referer: mainUrl },
+    });
+    if (subRes.ok) {
+      const subHtml = await subRes.text();
+      for (const m of subHtml.matchAll(/(?:href|src)=["']([^"']*viewer\.do[^"']*)["']/gi)) {
+        const u = m[1].replace(/&amp;/g, "&");
+        docUrls.add(u.startsWith("http") ? u : `${base}${u}`);
+      }
+    }
+  } catch { /* ignore */ }
+
+  if (docUrls.size === 0) {
+    throw new Error("공시 문서 URL을 찾을 수 없습니다 (viewer.do URL 없음)");
+  }
+
+  // 4. Fetch and parse each document page, pick highest relevance
+  let bestText = "";
+  for (const docUrl of [...docUrls].slice(0, 5)) {
+    try {
+      const r = await fetch(docUrl, {
+        signal: AbortSignal.timeout(10000),
+        headers: { ...headers, Referer: mainUrl },
+      });
+      if (!r.ok) continue;
+
+      const ct = r.headers.get("content-type") ?? "";
+      let html: string;
+      if (ct.toLowerCase().includes("euc-kr") || ct.toLowerCase().includes("ks_c_5601")) {
+        html = Buffer.from(await r.arrayBuffer()).toString("latin1");
+      } else {
+        html = await r.text();
+      }
+
+      const text = htmlToText(html);
+      if (relevanceScore(text) > relevanceScore(bestText)) bestText = text;
+    } catch { continue; }
+  }
+
+  if (!bestText || bestText.length < 100) throw new Error("문서 내용이 비어있습니다.");
   return bestText;
 }
 
@@ -285,7 +367,7 @@ function parseDisclosureText(
     "최저\\s*전환가", "하한가", "최저한도",
   ]));
 
-  // 전환청구기간: 구간 내 첫 날짜 = 시작, 마지막 날짜 = 종료
+  // 전환청구기간
   const cvIdx = text.search(/전환청구기간|전환가능기간|전환권\s*행사기간/i);
   if (cvIdx !== -1) {
     const cvSlice = text.slice(cvIdx, cvIdx + 300);
@@ -306,6 +388,9 @@ function parseDisclosureText(
   ]));
   set("callOptionRatio", extractPercent(text, [
     "매도청구권.{0,100}비율", "콜옵션.{0,100}비율",
+  ]));
+  set("callOptionRate", extractPercent(text, [
+    "매도청구권.{0,100}수익률", "콜옵션.{0,100}수익률", "매도청구\\s*수익률",
   ]));
 
   return { data: result, autoFilledFields: autoFilled, failedFields: failed };
@@ -339,36 +424,40 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    let text = "";
+    let lastError = "";
+
+    // 1차: DART Open API (ZIP 다운로드)
     const apiKey = process.env.DART_API_KEY;
-    if (!apiKey) {
-      return NextResponse.json(
-        { error: "DART API 키가 설정되지 않았습니다. 관리자에게 문의하세요." },
-        { status: 500 }
-      );
+    if (apiKey) {
+      try {
+        text = await fetchDartTextViaApi(rcpNo, apiKey);
+      } catch (err) {
+        lastError = err instanceof Error ? err.message : String(err);
+        console.error("[parse-disclosure] DART API failed:", lastError.slice(0, 200));
+      }
     }
 
-    let text: string;
-    try {
-      text = await fetchDartTextViaApi(rcpNo, apiKey);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "알 수 없는 오류";
-      console.error("[parse-disclosure] DART API error:", msg);
-      return NextResponse.json(
-        { error: `DART 문서 다운로드 실패: ${msg}` },
-        { status: 502 }
-      );
+    // 2차: 공개 DART 뷰어 스크래핑 (API 실패 시 폴백)
+    if (!text || text.length < 50) {
+      try {
+        text = await fetchDartTextViaScraping(rcpNo);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error("[parse-disclosure] Scraping failed:", msg);
+        lastError = lastError ? `${lastError} / 스크래핑 실패: ${msg}` : msg;
+      }
     }
 
     if (!text || text.length < 50) {
       return NextResponse.json(
-        { error: "공시 내용을 읽을 수 없습니다. ZIP 안에 HTML 파일이 없거나 내용이 비어있습니다." },
-        { status: 422 }
+        { error: `DART 문서 다운로드 실패: ${lastError}` },
+        { status: 502 }
       );
     }
 
     const result = parseDisclosureText(text, url);
 
-    // 개발 디버그: 추출된 텍스트 앞부분을 함께 반환 (파싱 검증용)
     return NextResponse.json({
       ...result,
       _debug: text.slice(0, 500),
