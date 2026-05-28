@@ -577,33 +577,34 @@ function parseDisclosureText(
   ]));
 
   // ── 콜옵션 (매도청구권) ──
-  // "11. 매도청구권" 또는 "매도청구권(Call Option)" 형태의 섹션 헤더를 찾음
-  // — 리픽싱 조항에 흘러나오는 단순 "매도청구권" 언급에 끌려가지 않도록 구체 패턴 사용
-  const callSecIdx = text.search(/\d{1,2}\.\s*매도청구권|매도청구권\s*[\(（]\s*Call\s*Option/i);
+  // 가장 신뢰성 높은 마커: "Call Option" (HTML 추출 과정에서 괄호/공백이 깨져도
+  // 영문 토큰은 거의 항상 보존됨)
+  const callSecIdx = text.search(/Call\s*Option/i);
   if (callSecIdx !== -1) {
-    const callSec = text.slice(callSecIdx, callSecIdx + 2000);
+    const callSec = text.slice(callSecIdx, callSecIdx + 2500);
 
-    // 날짜: "매매대금 지급기일" 이후 날짜들
-    const callDatesIdx = callSec.search(/매매대금\s*지급\s*기일|납입\s*기일/i);
-    if (callDatesIdx !== -1) {
-      const callDates = extractAllDates(callSec.slice(callDatesIdx, callDatesIdx + 800));
+    // 날짜: 콜옵션 섹션 전체에서 첫 날짜·마지막 날짜
+    // (서두 산문의 "발행일로부터 12개월(YYYY-MM-DD)" 와 표의 매매대금 지급기일 모두 동일한 시작/종료일)
+    const callDates = extractAllDates(callSec);
+    if (callDates.length >= 1) {
       set("callOptionStartDate", callDates[0]);
-      set("callOptionEndDate",   callDates.length > 1 ? callDates[callDates.length - 1] : undefined);
+      set("callOptionEndDate",   callDates.length > 1 ? callDates[callDates.length - 1] : callDates[0]);
     } else {
       failed.push("callOptionStartDate"); failed.push("callOptionEndDate");
     }
 
-    // 콜옵션 비율: "행사 범위" / "행사 가능 범위" / "권면총액의 N%"
+    // 콜옵션 비율: "매도청구권 행사 범위 : ... 발행가액의 30%" 형식
     const ratioMatch =
-      callSec.match(/행사\s*(?:가능\s*)?범위[^%\n]{0,80}([\d.]+)\s*%/) ??
-      callSec.match(/(?:권면총액|잔액|원금).{0,20}의?\s*([\d.]+)\s*%/) ??
-      callSec.match(/행사\s*가능.{0,30}([\d.]+)\s*%/);
+      callSec.match(/행사\s*(?:가능\s*)?범위[^%]{0,150}?([\d.]+)\s*%/) ??
+      callSec.match(/(?:권면총액|발행가액|잔액|원금)[^%]{0,30}?의?\s*([\d.]+)\s*%/) ??
+      callSec.match(/행사\s*가능.{0,30}?([\d.]+)\s*%/);
     set("callOptionRatio", ratioMatch ? parseFloat(ratioMatch[1]) : undefined);
 
-    // 콜옵션 금리: "매매가액 원금의 N%" 에서 N을 rate로
+    // 콜옵션 금리: "연 N%의 이율을 적용" 형식이 가장 흔함
     const rateMatch =
-      callSec.match(/매매가액[^%\n]{0,50}([\d.]+)\s*%/) ??
-      callSec.match(/매매\s*가액.{0,30}원금의?\s*([\d.]+)/);
+      callSec.match(/연\s*([\d.]+)\s*%\s*(?:의)?\s*이율/) ??
+      callSec.match(/이율[^%]{0,30}?([\d.]+)\s*%/) ??
+      callSec.match(/매매가액[^%]{0,200}?연\s*([\d.]+)\s*%/);
     set("callOptionRate", rateMatch ? parseFloat(rateMatch[1]) : undefined);
   } else {
     failed.push("callOptionStartDate"); failed.push("callOptionEndDate");
