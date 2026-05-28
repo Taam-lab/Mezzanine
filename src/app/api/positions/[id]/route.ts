@@ -62,7 +62,11 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     return NextResponse.json(updated);
   } catch (err) {
     console.error("[positions PATCH]", err);
-    return NextResponse.json({ error: "서버 오류가 발생했습니다." }, { status: 500 });
+    const detail = err instanceof Error ? err.message : String(err);
+    return NextResponse.json(
+      { error: `서버 오류가 발생했습니다: ${detail.slice(0, 300)}` },
+      { status: 500 }
+    );
   }
 }
 
