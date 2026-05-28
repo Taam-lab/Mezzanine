@@ -90,17 +90,49 @@ interface DartListItem {
   rm?: string;
 }
 
+/**
+ * DART list.json은 `rcept_no` 단독 필터를 지원하지 않음 (corp_code 또는 날짜범위 필요).
+ * 따라서 rcpNo의 앞 8자리(접수일)로 그 날짜의 주요사항보고서 목록을 받아온 뒤
+ * rcept_no가 정확히 일치하는 항목을 찾는다.
+ */
 async function fetchDartList(rcpNo: string, apiKey: string): Promise<DartListItem | null> {
-  const url = `${DART_BASE}/list.json?crtfc_key=${apiKey}&rcept_no=${rcpNo}`;
-  const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
-  if (!res.ok) throw new Error(`list.json HTTP ${res.status}`);
-  const data = await res.json() as { status?: string; message?: string; list?: DartListItem[] };
-  if (data.status && data.status !== "000") {
-    throw new Error(`list.json: ${data.status} ${data.message ?? ""}`);
+  if (!/^\d{14}$/.test(rcpNo)) {
+    throw new Error(`잘못된 rcept_no 형식: ${rcpNo}`);
   }
-  if (!data.list?.length) return null;
-  // rcept_no가 정확히 일치하는 항목 우선, 없으면 첫 번째 (API가 주변 공시를 함께 반환할 수 있음)
-  return data.list.find((item) => item.rcept_no === rcpNo) ?? data.list[0];
+  const date = rcpNo.slice(0, 8); // YYYYMMDD
+
+  // 주요사항보고서(B) 카테고리 우선 — 보통 하루 100건 미만
+  // 못 찾으면 전체 공시에서 다시 검색
+  for (const pblntfTy of ["B", ""] as const) {
+    for (let page = 1; page <= 5; page++) {
+      const params = new URLSearchParams({
+        crtfc_key: apiKey,
+        bgn_de: date,
+        end_de: date,
+        page_no: String(page),
+        page_count: "100",
+      });
+      if (pblntfTy) params.set("pblntf_ty", pblntfTy);
+      const url = `${DART_BASE}/list.json?${params.toString()}`;
+      const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+      if (!res.ok) throw new Error(`list.json HTTP ${res.status}`);
+      const data = await res.json() as {
+        status?: string;
+        message?: string;
+        list?: DartListItem[];
+        total_page?: number;
+      };
+      if (data.status && data.status !== "000" && data.status !== "013") {
+        // 013 = no data; 다른 에러는 즉시 throw
+        throw new Error(`list.json: ${data.status} ${data.message ?? ""}`);
+      }
+      const found = data.list?.find((item) => item.rcept_no === rcpNo);
+      if (found) return found;
+      if (!data.total_page || page >= data.total_page) break;
+    }
+  }
+
+  return null;
 }
 
 /**
