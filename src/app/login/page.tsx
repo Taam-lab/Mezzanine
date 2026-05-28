@@ -19,25 +19,29 @@ export default function LoginPage() {
     setError("");
     setLoading(true);
 
-    const result = await signIn("credentials", {
-      email,
-      password,
-      redirect: false,
-    });
+    try {
+      const result = await signIn("credentials", {
+        email,
+        password,
+        redirect: false,
+      });
 
-    setLoading(false);
+      if (result?.error === "PENDING_APPROVAL") {
+        router.push("/signup/pending");
+        return;
+      }
 
-    if (result?.error === "PENDING_APPROVAL") {
-      router.push("/signup/pending");
-      return;
+      if (result?.error) {
+        setError("이메일 또는 비밀번호가 올바르지 않습니다.");
+        return;
+      }
+
+      router.push("/dashboard");
+    } catch {
+      setError("서버에 연결할 수 없습니다. 잠시 후 다시 시도해주세요.");
+    } finally {
+      setLoading(false);
     }
-
-    if (result?.error) {
-      setError("이메일 또는 비밀번호가 올바르지 않습니다.");
-      return;
-    }
-
-    router.push("/dashboard");
   }
 
   return (

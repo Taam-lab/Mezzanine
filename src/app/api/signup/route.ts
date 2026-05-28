@@ -35,7 +35,12 @@ export async function POST(req: NextRequest) {
     });
 
     return NextResponse.json({ ok: true });
-  } catch {
-    return NextResponse.json({ error: "서버 오류가 발생했습니다." }, { status: 500 });
+  } catch (err) {
+    console.error("[signup] error:", err);
+    const message = err instanceof Error ? err.message : "알 수 없는 오류";
+    return NextResponse.json(
+      { error: "서버 오류가 발생했습니다.", detail: message },
+      { status: 500 }
+    );
   }
 }

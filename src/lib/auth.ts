@@ -18,26 +18,35 @@ export const authOptions: NextAuthOptions = {
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) return null;
 
-        const user = await prisma.user.findUnique({
-          where: { email: credentials.email },
-        });
+        try {
+          const user = await prisma.user.findUnique({
+            where: { email: credentials.email },
+          });
 
-        if (!user) return null;
-        if (!user.isActive) return null;
+          if (!user) return null;
+          if (!user.isActive) return null;
 
-        const valid = await bcrypt.compare(credentials.password, user.passwordHash);
-        if (!valid) return null;
+          const valid = await bcrypt.compare(credentials.password, user.passwordHash);
+          if (!valid) return null;
 
-        if (!user.isApproved) {
-          throw new Error("PENDING_APPROVAL");
+          if (!user.isApproved) {
+            throw new Error("PENDING_APPROVAL");
+          }
+
+          await prisma.user.update({
+            where: { id: user.id },
+            data: { lastLoginAt: new Date() },
+          });
+
+          return { id: user.id, email: user.email, name: user.name };
+        } catch (err) {
+          // PENDING_APPROVAL은 의도된 에러이므로 그대로 throw
+          if (err instanceof Error && err.message === "PENDING_APPROVAL") {
+            throw err;
+          }
+          console.error("[auth] authorize error:", err);
+          return null;
         }
-
-        await prisma.user.update({
-          where: { id: user.id },
-          data: { lastLoginAt: new Date() },
-        });
-
-        return { id: user.id, email: user.email, name: user.name };
       },
     }),
   ],
