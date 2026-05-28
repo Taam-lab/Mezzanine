@@ -173,7 +173,7 @@ async function fetchDartTextViaApi(rcpNo: string, apiKey: string): Promise<strin
 // DART web scraping fallback (public viewer)
 // ──────────────────────────────────────────────
 
-async function fetchDartTextViaScraping(rcpNo: string): Promise<string> {
+async function fetchDartTextViaScraping(rcpNo: string): Promise<{ text: string; debugInfo: string }> {
   const base = "https://dart.fss.or.kr";
   const headers: Record<string, string> = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -181,27 +181,47 @@ async function fetchDartTextViaScraping(rcpNo: string): Promise<string> {
     "Accept-Language": "ko-KR,ko;q=0.9",
   };
 
-  // 1. Fetch main frameset page
   const mainUrl = `${base}/dsaf001/main.do?rcpNo=${rcpNo}`;
   const mainRes = await fetch(mainUrl, { signal: AbortSignal.timeout(10000), headers });
   if (!mainRes.ok) throw new Error(`DART viewer HTTP ${mainRes.status}`);
   const mainHtml = await mainRes.text();
 
-  // Collect session cookie if set
   const setCookie = mainRes.headers.get("set-cookie");
-  if (setCookie) {
-    const cookieVal = setCookie.split(";")[0];
-    if (cookieVal) headers["Cookie"] = cookieVal;
-  }
+  if (setCookie) headers["Cookie"] = setCookie.split(";")[0];
 
-  // 2. Extract viewer.do URLs from the frameset HTML
+  // If main page itself has disclosure content, use it
+  const mainText = htmlToText(mainHtml);
+  if (relevanceScore(mainText) >= 5) return { text: mainText, debugInfo: "main.do 직접 파싱" };
+
   const docUrls = new Set<string>();
-  for (const m of mainHtml.matchAll(/src=["']([^"']*viewer\.do[^"']*)["']/gi)) {
-    const u = m[1].replace(/&amp;/g, "&");
-    docUrls.add(u.startsWith("http") ? u : `${base}${u}`);
+  const debugLines: string[] = [];
+
+  // Look for any frame/iframe src attributes
+  for (const m of mainHtml.matchAll(/<(?:frame|iframe)[^>]+src=["']([^"']+)["']/gi)) {
+    const u = m[1].replace(/&amp;/g, "&").trim();
+    if (u && !u.startsWith("javascript") && u !== "about:blank" && u !== "") {
+      const full = u.startsWith("http") ? u : `${base}${u}`;
+      docUrls.add(full);
+      debugLines.push(`frame: ${full}`);
+    }
   }
 
-  // 3. Check sub.do (TOC sidebar) for additional document links
+  // viewer.do URLs anywhere in the page
+  for (const m of mainHtml.matchAll(/["']([^"']*viewer\.do\?[^"']*)["']/gi)) {
+    const u = m[1].replace(/&amp;/g, "&");
+    const full = u.startsWith("http") ? u : `${base}${u}`;
+    docUrls.add(full);
+    debugLines.push(`viewer: ${full}`);
+  }
+
+  // dcmNo in JS variables → construct viewer URL
+  for (const m of mainHtml.matchAll(/['"]?dcmNo['"]?\s*[:=,]\s*['"]?(\d{7,12})['"]?/gi)) {
+    const url = `${base}/report/viewer.do?rcpNo=${rcpNo}&dcmNo=${m[1]}&eleId=0&offset=0&length=0&dtd=dart3.xsd`;
+    docUrls.add(url);
+    debugLines.push(`dcmNo(main): ${m[1]}`);
+  }
+
+  // Try sub.do (document index sidebar)
   try {
     const subUrl = `${base}/dsaf001/sub.do?rcpNo=${rcpNo}`;
     const subRes = await fetch(subUrl, {
@@ -210,26 +230,68 @@ async function fetchDartTextViaScraping(rcpNo: string): Promise<string> {
     });
     if (subRes.ok) {
       const subHtml = await subRes.text();
-      for (const m of subHtml.matchAll(/(?:href|src)=["']([^"']*viewer\.do[^"']*)["']/gi)) {
+      debugLines.push(`sub.do: ${subHtml.length}bytes`);
+
+      // sub.do content itself
+      const subText = htmlToText(subHtml);
+      if (relevanceScore(subText) >= 5) return { text: subText, debugInfo: "sub.do 직접 파싱" };
+
+      // viewer.do URLs in sub.do
+      for (const m of subHtml.matchAll(/["']([^"']*viewer\.do\?[^"']*)["']/gi)) {
         const u = m[1].replace(/&amp;/g, "&");
         docUrls.add(u.startsWith("http") ? u : `${base}${u}`);
       }
-    }
-  } catch { /* ignore */ }
 
-  if (docUrls.size === 0) {
-    throw new Error("공시 문서 URL을 찾을 수 없습니다 (viewer.do URL 없음)");
+      // JS function calls: goView('dcmNo', ...) / fn_view('dcmNo', ...) etc.
+      for (const m of subHtml.matchAll(/(?:goView|viewDoc|fn_view|openDoc|viewReport)\s*\(\s*['"]?(\d{7,12})['"]?/gi)) {
+        const url = `${base}/report/viewer.do?rcpNo=${rcpNo}&dcmNo=${m[1]}&eleId=0&offset=0&length=0&dtd=dart3.xsd`;
+        docUrls.add(url);
+        debugLines.push(`goView dcmNo: ${m[1]}`);
+      }
+
+      // data-dcm attributes
+      for (const m of subHtml.matchAll(/data-(?:dcm|dcmno|dcm-no)=["'](\d{7,12})["']/gi)) {
+        const url = `${base}/report/viewer.do?rcpNo=${rcpNo}&dcmNo=${m[1]}&eleId=0&offset=0&length=0&dtd=dart3.xsd`;
+        docUrls.add(url);
+        debugLines.push(`data-dcm: ${m[1]}`);
+      }
+
+      // dcmNo in JS variables
+      for (const m of subHtml.matchAll(/['"]?dcmNo['"]?\s*[:=,]\s*['"]?(\d{7,12})['"]?/gi)) {
+        const url = `${base}/report/viewer.do?rcpNo=${rcpNo}&dcmNo=${m[1]}&eleId=0&offset=0&length=0&dtd=dart3.xsd`;
+        docUrls.add(url);
+        debugLines.push(`dcmNo(sub): ${m[1]}`);
+      }
+
+      // href links that look like document pages
+      for (const m of subHtml.matchAll(/href=["']([^"']+\.html?)["']/gi)) {
+        const u = m[1].replace(/&amp;/g, "&");
+        docUrls.add(u.startsWith("http") ? u : `${base}${u}`);
+      }
+    } else {
+      debugLines.push(`sub.do HTTP ${subRes.status}`);
+    }
+  } catch (e) {
+    debugLines.push(`sub.do error: ${e}`);
   }
 
-  // 4. Fetch and parse each document page, pick highest relevance
+  const debugStr = debugLines.join(" | ") || "no patterns found";
+
+  if (docUrls.size === 0) {
+    const snippet = mainHtml.slice(0, 400).replace(/\s+/g, " ");
+    throw new Error(`URL 없음 [${debugStr}] 페이지: ${snippet}`);
+  }
+
   let bestText = "";
-  for (const docUrl of [...docUrls].slice(0, 5)) {
+  const triedUrls: string[] = [];
+  for (const docUrl of [...docUrls].slice(0, 8)) {
+    triedUrls.push(docUrl);
     try {
       const r = await fetch(docUrl, {
         signal: AbortSignal.timeout(10000),
         headers: { ...headers, Referer: mainUrl },
       });
-      if (!r.ok) continue;
+      if (!r.ok) { triedUrls[triedUrls.length - 1] += `(${r.status})`; continue; }
 
       const ct = r.headers.get("content-type") ?? "";
       let html: string;
@@ -238,14 +300,15 @@ async function fetchDartTextViaScraping(rcpNo: string): Promise<string> {
       } else {
         html = await r.text();
       }
-
       const text = htmlToText(html);
       if (relevanceScore(text) > relevanceScore(bestText)) bestText = text;
     } catch { continue; }
   }
 
-  if (!bestText || bestText.length < 100) throw new Error("문서 내용이 비어있습니다.");
-  return bestText;
+  if (!bestText || bestText.length < 100) {
+    throw new Error(`내용 없음. 시도: ${triedUrls.slice(0, 3).join(", ")}`);
+  }
+  return { text: bestText, debugInfo: debugStr };
 }
 
 // ──────────────────────────────────────────────
@@ -426,6 +489,7 @@ export async function POST(req: NextRequest) {
 
     let text = "";
     let lastError = "";
+    let scrapeDebug = "";
 
     // 1차: DART Open API (ZIP 다운로드)
     const apiKey = process.env.DART_API_KEY;
@@ -441,10 +505,12 @@ export async function POST(req: NextRequest) {
     // 2차: 공개 DART 뷰어 스크래핑 (API 실패 시 폴백)
     if (!text || text.length < 50) {
       try {
-        text = await fetchDartTextViaScraping(rcpNo);
+        const result = await fetchDartTextViaScraping(rcpNo);
+        text = result.text;
+        scrapeDebug = result.debugInfo;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.error("[parse-disclosure] Scraping failed:", msg);
+        console.error("[parse-disclosure] Scraping failed:", msg.slice(0, 300));
         lastError = lastError ? `${lastError} / 스크래핑 실패: ${msg}` : msg;
       }
     }
@@ -461,6 +527,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       ...result,
       _debug: text.slice(0, 500),
+      _scrapeDebug: scrapeDebug || undefined,
     });
   } catch (err) {
     console.error("[parse-disclosure]", err);
