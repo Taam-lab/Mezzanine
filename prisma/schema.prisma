@@ -1,0 +1,253 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id          String    @id @default(cuid())
+  email       String    @unique
+  name        String
+  passwordHash String   @map("password_hash")
+  isApproved  Boolean   @default(false) @map("is_approved")
+  approvedAt  DateTime? @map("approved_at")
+  approvedBy  String?   @map("approved_by")
+  isActive    Boolean   @default(true) @map("is_active")
+  lastLoginAt DateTime? @map("last_login_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  positions            Position[]
+  alertStatuses        AlertUserStatus[]
+  notificationSettings NotificationSetting[]
+  pushSubscriptions    PushSubscription[]
+
+  @@map("users")
+}
+
+model Position {
+  id                     String    @id @default(cuid())
+  bondCode               String?   @map("bond_code")
+  assetName              String    @map("asset_name")
+  underlyingTicker       String    @map("underlying_ticker")
+  underlyingCompanyName  String    @map("underlying_company_name")
+  underlyingMarket       String    @default("KOSPI") @map("underlying_market")
+  mezzanineType          String    @default("CB") @map("mezzanine_type")
+  issueDate              DateTime? @map("issue_date")
+  investmentType         String    @default("DIRECT") @map("investment_type")
+  investmentAmount       BigInt?   @map("investment_amount")
+  maturityDate           DateTime? @map("maturity_date")
+  couponRate             Float?    @map("coupon_rate")
+  ytm                    Float?
+  initialConversionPrice Float?    @map("initial_conversion_price")
+  minConversionPrice     Float?    @map("min_conversion_price")
+  currentConversionPrice Float?    @map("current_conversion_price")
+  conversionStartDate    DateTime? @map("conversion_start_date")
+  conversionEndDate      DateTime? @map("conversion_end_date")
+  putOptionRate          Float?    @map("put_option_rate")
+  putOptionStartDate     DateTime? @map("put_option_start_date")
+  putOptionEndDate       DateTime? @map("put_option_end_date")
+  callOptionRatio        Float?    @map("call_option_ratio")
+  callOptionStartDate    DateTime? @map("call_option_start_date")
+  callOptionEndDate      DateTime? @map("call_option_end_date")
+  callOptionRate         Float?    @map("call_option_rate")
+  seriesNumber           Int?      @map("series_number")
+  sourceDisclosureUrl    String?   @map("source_disclosure_url")
+  ownerUserId            String    @map("owner_user_id")
+  note                   String?
+  isActive               Boolean   @default(true) @map("is_active")
+  createdAt              DateTime  @default(now()) @map("created_at")
+  updatedAt              DateTime  @updatedAt @map("updated_at")
+
+  owner                  User                     @relation(fields: [ownerUserId], references: [id])
+  alerts                 Alert[]
+  newsItems              NewsItem[]
+  disclosures            Disclosure[]
+  priceSnapshots         PriceSnapshot[]
+  financialSnapshots     FinancialSnapshot[]
+  riskCheckResults       RiskCheckResult[]
+  conversionPriceHistory ConversionPriceHistory[]
+
+  @@map("positions")
+}
+
+model ConversionPriceHistory {
+  id               String   @id @default(cuid())
+  positionId       String   @map("position_id")
+  oldPrice         Float    @map("old_price")
+  newPrice         Float    @map("new_price")
+  adjustmentReason String?  @map("adjustment_reason")
+  sourceDisclosureId String? @map("source_disclosure_id")
+  adjustedAt       DateTime @default(now()) @map("adjusted_at")
+  isAutomatic      Boolean  @default(false) @map("is_automatic")
+
+  position   Position    @relation(fields: [positionId], references: [id])
+  disclosure Disclosure? @relation(fields: [sourceDisclosureId], references: [id])
+
+  @@map("conversion_price_history")
+}
+
+model Alert {
+  id         String   @id @default(cuid())
+  positionId String?  @map("position_id")
+  alertType  String   @map("alert_type")
+  severity   String   @default("INFO")
+  title      String
+  body       String?
+  sourceUrl  String?  @map("source_url")
+  metadata   String?  // JSON string
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  position Position?         @relation(fields: [positionId], references: [id])
+  userStatuses AlertUserStatus[]
+
+  @@map("alerts")
+}
+
+model AlertUserStatus {
+  id         String    @id @default(cuid())
+  alertId    String    @map("alert_id")
+  userId     String    @map("user_id")
+  isRead     Boolean   @default(false) @map("is_read")
+  isArchived Boolean   @default(false) @map("is_archived")
+  readAt     DateTime? @map("read_at")
+
+  alert Alert @relation(fields: [alertId], references: [id])
+  user  User  @relation(fields: [userId], references: [id])
+
+  @@unique([alertId, userId])
+  @@map("alert_user_status")
+}
+
+model NewsItem {
+  id              String   @id @default(cuid())
+  positionId      String   @map("position_id")
+  title           String
+  summary         String?
+  source          String?
+  sourceUrl       String   @unique @map("source_url")
+  publishedAt     DateTime @map("published_at")
+  matchedKeywords String?  @map("matched_keywords") // JSON array string
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  position Position @relation(fields: [positionId], references: [id])
+
+  @@map("news_items")
+}
+
+model Disclosure {
+  id         String   @id @default(cuid())
+  positionId String   @map("position_id")
+  rceptNo    String   @unique @map("rcept_no")
+  corpCode   String?  @map("corp_code")
+  reportName String   @map("report_name")
+  reportType String?  @map("report_type")
+  severity   String   @default("INFO")
+  filedAt    DateTime @map("filed_at")
+  dartUrl    String?  @map("dart_url")
+  parsedData String?  @map("parsed_data") // JSON string
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  position               Position                 @relation(fields: [positionId], references: [id])
+  conversionPriceHistory ConversionPriceHistory[]
+
+  @@map("disclosures")
+}
+
+model PriceSnapshot {
+  id          String   @id @default(cuid())
+  positionId  String   @map("position_id")
+  price       Float
+  changeRate  Float?   @map("change_rate")
+  volume      BigInt?
+  marketCap   BigInt?  @map("market_cap")
+  source      String   @default("naver")
+  snapshotAt  DateTime @default(now()) @map("snapshot_at")
+
+  position Position @relation(fields: [positionId], references: [id])
+
+  @@map("price_snapshots")
+}
+
+model FinancialSnapshot {
+  id               String   @id @default(cuid())
+  positionId       String   @map("position_id")
+  fiscalYear       Int      @map("fiscal_year")
+  fiscalQuarter    Int      @default(0) @map("fiscal_quarter")
+  revenue          BigInt?
+  operatingProfit  BigInt?  @map("operating_profit")
+  netIncome        BigInt?  @map("net_income")
+  totalEquity      BigInt?  @map("total_equity")
+  capital          BigInt?
+  auditOpinion     String?  @map("audit_opinion")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  position Position @relation(fields: [positionId], references: [id])
+
+  @@map("financial_snapshots")
+}
+
+model RiskCheckResult {
+  id         String   @id @default(cuid())
+  positionId String   @map("position_id")
+  checkId    String   @map("check_id")
+  status     String   @default("NORMAL")
+  value      String?  // JSON string
+  checkedAt  DateTime @default(now()) @map("checked_at")
+
+  position Position @relation(fields: [positionId], references: [id])
+
+  @@map("risk_check_results")
+}
+
+model NotificationSetting {
+  id          String  @id @default(cuid())
+  userId      String  @map("user_id")
+  positionId  String? @map("position_id")
+  alertType   String? @map("alert_type")
+  severity    String?
+  isEnabled   Boolean @default(true) @map("is_enabled")
+  channels    String  @default("web_push") // JSON array string
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("notification_settings")
+}
+
+model PushSubscription {
+  id           String   @id @default(cuid())
+  userId       String   @map("user_id")
+  endpoint     String   @unique
+  p256dhKey    String   @map("p256dh_key")
+  authKey      String   @map("auth_key")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("push_subscriptions")
+}
+
+model Integration {
+  id              String    @id @default(cuid())
+  serviceName     String    @unique @map("service_name")
+  credentials     String?   // AES-256 encrypted JSON
+  isEnabled       Boolean   @default(false) @map("is_enabled")
+  lastValidatedAt DateTime? @map("last_validated_at")
+  createdBy       String?   @map("created_by")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@map("integrations")
+}
+
+model SystemSetting {
+  key       String   @id
+  value     String
+  updatedBy String?  @map("updated_by")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("system_settings")
+}

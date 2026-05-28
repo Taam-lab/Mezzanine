@@ -1,0 +1,52 @@
+@import "tailwindcss";
+
+@theme {
+  --color-navy-deep: #0a2a5e;
+  --color-navy-medium: #0d3a7a;
+  --color-navy-light: #1a4a8e;
+  --color-orange-brand: #ff6b35;
+  --color-orange-hover: #e55a25;
+  --color-rise: #e63946;
+  --color-fall: #1d4ed8;
+  --color-alert-critical: #dc2626;
+  --color-alert-warning: #f59e0b;
+  --color-alert-info: #10b981;
+  --color-bg-base: #f5f7fa;
+  --font-family-sans: "Pretendard", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: var(--font-family-sans);
+  background-color: var(--color-bg-base);
+  color: #1a1a2e;
+}
+
+/* 숫자 등폭 */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 상승/하락 색상 */
+.text-rise {
+  color: var(--color-rise);
+}
+.text-fall {
+  color: var(--color-fall);
+}
+
+/* 스크롤바 */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 3px;
+}
