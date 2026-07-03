@@ -32,19 +32,58 @@ interface Position {
   priceSnapshots: Array<{ price: number; changeRate: number; snapshotAt: string }>;
 }
 
+interface LiveQuote {
+  price: number;
+  changeRate: number;
+}
+
 export default function PositionsPage() {
   const [positions, setPositions] = useState<Position[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [livePrices, setLivePrices] = useState<Record<string, LiveQuote>>({});
+  const [refreshing, setRefreshing] = useState(false);
+
+  async function refreshLivePrices(list: Position[]) {
+    const tickers = Array.from(
+      new Set(list.map((p) => p.underlyingTicker).filter((t) => /^\d{6}$/.test(t))),
+    );
+    if (tickers.length === 0) return;
+    setRefreshing(true);
+    try {
+      const res = await fetch(`/api/prices?tickers=${tickers.join(",")}`);
+      if (!res.ok) return;
+      const data = (await res.json()) as {
+        quotes: Record<string, { price?: number; changeRate?: number; error?: string }>;
+      };
+      const next: Record<string, LiveQuote> = {};
+      for (const [t, q] of Object.entries(data.quotes)) {
+        if (typeof q.price === "number") {
+          next[t] = { price: q.price, changeRate: q.changeRate ?? 0 };
+        }
+      }
+      setLivePrices(next);
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   useEffect(() => {
     fetch("/api/positions")
       .then((r) => r.json())
       .then((data) => {
-        setPositions(Array.isArray(data) ? data : []);
+        const list = Array.isArray(data) ? data : [];
+        setPositions(list);
         setLoading(false);
+        if (list.length > 0) refreshLivePrices(list);
       });
   }, []);
+
+  useEffect(() => {
+    if (positions.length === 0) return;
+    const id = setInterval(() => refreshLivePrices(positions), 60_000);
+    return () => clearInterval(id);
+  }, [positions]);
 
   const filtered = positions.filter(
     (p) =>
@@ -58,12 +97,23 @@ export default function PositionsPage() {
       <div className="space-y-5">
         <div className="flex items-center justify-between">
           <h1 className="text-xl font-bold text-gray-900">보유 종목</h1>
-          <Link href="/positions/new">
-            <Button variant="primary" size="sm">
-              <Plus className="h-4 w-4" />
-              종목 등록
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => refreshLivePrices(positions)}
+              disabled={refreshing || positions.length === 0}
+              title="네이버 실시간 시세 새로고침"
+            >
+              {refreshing ? "새로고침 중..." : "시세 새로고침"}
             </Button>
-          </Link>
+            <Link href="/positions/new">
+              <Button variant="primary" size="sm">
+                <Plus className="h-4 w-4" />
+                종목 등록
+              </Button>
+            </Link>
+          </div>
         </div>
 
         {/* 검색 */}
@@ -115,12 +165,15 @@ export default function PositionsPage() {
                 </thead>
                 <tbody className="divide-y divide-gray-50">
                   {filtered.map((pos) => {
-                    const latest = pos.priceSnapshots?.[0];
-                    const isRise = (latest?.changeRate ?? 0) > 0;
-                    const isFall = (latest?.changeRate ?? 0) < 0;
+                    const live = livePrices[pos.underlyingTicker];
+                    const snapshot = pos.priceSnapshots?.[0];
+                    const price = live?.price ?? snapshot?.price;
+                    const changeRate = live?.changeRate ?? snapshot?.changeRate ?? 0;
+                    const isRise = changeRate > 0;
+                    const isFall = changeRate < 0;
                     const parity =
-                      latest?.price && pos.currentConversionPrice
-                        ? (latest.price / pos.currentConversionPrice) * 100
+                      price && pos.currentConversionPrice
+                        ? (price / pos.currentConversionPrice) * 100
                         : null;
 
                     return (
@@ -159,10 +212,10 @@ export default function PositionsPage() {
                             : "-"}
                         </td>
                         <td className="px-4 py-3 text-right tabular-nums text-sm font-medium text-gray-900">
-                          {latest ? formatKRW(latest.price) : "-"}
+                          {price ? formatKRW(price) : "-"}
                         </td>
                         <td className="px-4 py-3 text-right">
-                          {latest ? (
+                          {price !== undefined ? (
                             <span
                               className={`tabular-nums text-sm font-semibold flex items-center justify-end gap-0.5 ${
                                 isRise ? "text-rise" : isFall ? "text-fall" : "text-gray-500"
@@ -173,7 +226,7 @@ export default function PositionsPage() {
                               ) : isFall ? (
                                 <TrendingDown className="h-3 w-3" />
                               ) : null}
-                              {formatPercent(latest.changeRate)}
+                              {formatPercent(changeRate)}
                             </span>
                           ) : (
                             <span className="text-gray-400 text-sm">-</span>
