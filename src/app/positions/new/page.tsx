@@ -25,6 +25,8 @@ interface ParseResult {
   failedFields: string[];
   _meta?: Record<string, unknown>;
   _rawDecision?: Record<string, unknown>;
+  _claudeStatus?: string;
+  _bodyExcerpt?: string;
 }
 
 function NewPositionContent() {
@@ -207,7 +209,12 @@ function NewPositionContent() {
                       </p>
                       {parseResult.failedFields.some((f: string) => f.startsWith("put") || f.startsWith("call")) && (
                         <p className="text-[11px] text-gray-500 mt-0.5">
-                          * 풋옵션/콜옵션 조항은 DART 정형 API에 포함되지 않아 자동 추출이 불가능합니다. 수동 입력해주세요.
+                          * 풋/콜옵션은 DART 정형 API에 없어 원문 스크래핑 + Claude로 추출을 시도합니다.
+                        </p>
+                      )}
+                      {parseResult._claudeStatus && (
+                        <p className="text-[11px] text-gray-500 mt-0.5">
+                          Claude 폴백: {parseResult._claudeStatus}
                         </p>
                       )}
                     </>

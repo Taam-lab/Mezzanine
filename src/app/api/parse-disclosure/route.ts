@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
+import { fetchDisclosureBodyText } from "@/lib/dartScrape";
+import { extractPutCallWithClaude, type PutCallExtraction } from "@/lib/claudeExtract";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
-export const maxDuration = 20;
+export const maxDuration = 45; // 스크래핑 + Claude 추출 여유
 
 // ──────────────────────────────────────────────
 // Schema & helpers
@@ -384,12 +386,54 @@ export async function POST(req: NextRequest) {
     const { data, filled, unfilled } = mapDecisionToSchema(row, type, meta);
     data.sourceDisclosureUrl = url;
 
+    // 6단계: 정형 API가 못 넘겨준 풋/콜옵션 필드는 원문 스크래핑 + Claude로 폴백
+    // (ANTHROPIC_API_KEY가 설정돼 있고 CB일 때만)
+    const putCallKeys: Array<keyof PutCallExtraction> = [
+      "putOptionStartDate",
+      "putOptionEndDate",
+      "putOptionRate",
+      "callOptionStartDate",
+      "callOptionEndDate",
+      "callOptionRatio",
+      "callOptionRate",
+    ];
+    const missingPutCall = putCallKeys.filter((k) => unfilled.includes(k));
+    let claudeStatus: string | undefined;
+    let bodyExcerpt: string | undefined;
+
+    if (missingPutCall.length > 0 && process.env.ANTHROPIC_API_KEY && type === "CB") {
+      try {
+        const bodyText = await fetchDisclosureBodyText(rcpNo);
+        bodyExcerpt = bodyText.slice(0, 2000);
+        const extracted = await extractPutCallWithClaude(bodyText);
+
+        for (const k of putCallKeys) {
+          if (extracted[k] !== undefined && !filled.includes(k)) {
+            (data as Record<string, unknown>)[k] = extracted[k];
+            filled.push(k);
+          }
+        }
+        // unfilled 목록에서 이번에 채워진 필드 제거
+        const filledSet = new Set(filled);
+        for (let i = unfilled.length - 1; i >= 0; i--) {
+          if (filledSet.has(unfilled[i])) unfilled.splice(i, 1);
+        }
+        claudeStatus = `OK (${Object.keys(extracted).length}개 추출)`;
+      } catch (err) {
+        claudeStatus = `실패: ${(err instanceof Error ? err.message : String(err)).slice(0, 150)}`;
+      }
+    } else if (missingPutCall.length > 0 && !process.env.ANTHROPIC_API_KEY) {
+      claudeStatus = "ANTHROPIC_API_KEY 미설정 (수동 입력 필요)";
+    }
+
     return NextResponse.json({
       data,
       autoFilledFields: filled,
       failedFields: unfilled,
       _meta: meta,
       _rawDecision: row,
+      _claudeStatus: claudeStatus,
+      _bodyExcerpt: bodyExcerpt,
     });
   } catch (err) {
     console.error("[parse-disclosure]", err);
