@@ -90,46 +90,78 @@ interface DartListItem {
   rm?: string;
 }
 
+interface DartListPage {
+  list: DartListItem[];
+  totalPage: number;
+}
+
+async function fetchListPage(
+  date: string,
+  pageNo: number,
+  pblntfTy: string,
+  apiKey: string,
+): Promise<DartListPage | null> {
+  const params = new URLSearchParams({
+    crtfc_key: apiKey,
+    bgn_de: date,
+    end_de: date,
+    page_no: String(pageNo),
+    page_count: "100",
+  });
+  if (pblntfTy) params.set("pblntf_ty", pblntfTy);
+  const url = `${DART_BASE}/list.json?${params.toString()}`;
+  const res = await fetch(url, { signal: AbortSignal.timeout(6000) });
+  if (!res.ok) throw new Error(`list.json HTTP ${res.status}`);
+  const data = await res.json() as {
+    status?: string;
+    message?: string;
+    list?: DartListItem[];
+    total_page?: number;
+  };
+  // 013 = no data → 빈 페이지로 취급
+  if (data.status === "013") return { list: [], totalPage: 0 };
+  if (data.status && data.status !== "000") {
+    throw new Error(`list.json: ${data.status} ${data.message ?? ""}`);
+  }
+  return { list: data.list ?? [], totalPage: data.total_page ?? 1 };
+}
+
 /**
  * DART list.json은 `rcept_no` 단독 필터를 지원하지 않음 (corp_code 또는 날짜범위 필요).
- * 따라서 rcpNo의 앞 8자리(접수일)로 그 날짜의 주요사항보고서 목록을 받아온 뒤
+ * 따라서 rcpNo의 앞 8자리(접수일)로 그 날짜의 공시 목록을 받아온 뒤
  * rcept_no가 정확히 일치하는 항목을 찾는다.
+ *
+ * 최적화: 페이지 1-3을 병렬로 던져 wall-clock을 줄인다.
+ * 카테고리도 주요사항보고서(B)와 전체(빈값)를 병렬로 시도.
  */
 async function fetchDartList(rcpNo: string, apiKey: string): Promise<DartListItem | null> {
   if (!/^\d{14}$/.test(rcpNo)) {
     throw new Error(`잘못된 rcept_no 형식: ${rcpNo}`);
   }
-  const date = rcpNo.slice(0, 8); // YYYYMMDD
+  const date = rcpNo.slice(0, 8);
 
-  // 주요사항보고서(B) 카테고리 우선 — 보통 하루 100건 미만
-  // 못 찾으면 전체 공시에서 다시 검색
-  for (const pblntfTy of ["B", ""] as const) {
-    for (let page = 1; page <= 5; page++) {
-      const params = new URLSearchParams({
-        crtfc_key: apiKey,
-        bgn_de: date,
-        end_de: date,
-        page_no: String(page),
-        page_count: "100",
-      });
-      if (pblntfTy) params.set("pblntf_ty", pblntfTy);
-      const url = `${DART_BASE}/list.json?${params.toString()}`;
-      const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
-      if (!res.ok) throw new Error(`list.json HTTP ${res.status}`);
-      const data = await res.json() as {
-        status?: string;
-        message?: string;
-        list?: DartListItem[];
-        total_page?: number;
-      };
-      if (data.status && data.status !== "000" && data.status !== "013") {
-        // 013 = no data; 다른 에러는 즉시 throw
-        throw new Error(`list.json: ${data.status} ${data.message ?? ""}`);
-      }
-      const found = data.list?.find((item) => item.rcept_no === rcpNo);
-      if (found) return found;
-      if (!data.total_page || page >= data.total_page) break;
-    }
+  // 1단계: B 카테고리 페이지 1-3 병렬 (대부분 여기서 잡힘)
+  const firstBatch = await Promise.all(
+    [1, 2, 3].map((p) => fetchListPage(date, p, "B", apiKey).catch(() => null)),
+  );
+  for (const page of firstBatch) {
+    const found = page?.list.find((item) => item.rcept_no === rcpNo);
+    if (found) return found;
+  }
+  const bMaxPage = Math.max(0, ...firstBatch.map((p) => p?.totalPage ?? 0));
+
+  // 2단계: B 카테고리에 페이지가 더 있으면 4-5 병렬 + 전체 카테고리 1-3 병렬 동시 진행
+  const secondBatch = await Promise.all([
+    ...(bMaxPage > 3
+      ? [4, 5].filter((p) => p <= bMaxPage).map((p) =>
+          fetchListPage(date, p, "B", apiKey).catch(() => null),
+        )
+      : []),
+    ...[1, 2, 3].map((p) => fetchListPage(date, p, "", apiKey).catch(() => null)),
+  ]);
+  for (const page of secondBatch) {
+    const found = page?.list.find((item) => item.rcept_no === rcpNo);
+    if (found) return found;
   }
 
   return null;
@@ -173,7 +205,7 @@ async function fetchStructuredDecision(
 
   const endpoint = ENDPOINTS[type];
   const url = `${DART_BASE}/${endpoint}?crtfc_key=${apiKey}&corp_code=${corpCode}&bgn_de=${fmt(bgn)}&end_de=${fmt(end)}`;
-  const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+  const res = await fetch(url, { signal: AbortSignal.timeout(6000) });
   if (!res.ok) throw new Error(`${endpoint} HTTP ${res.status}`);
   const data = await res.json() as {
     status?: string;
