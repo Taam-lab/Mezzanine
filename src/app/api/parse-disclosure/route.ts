@@ -287,11 +287,50 @@ function mapDecisionToSchema(
   set("maturityDate", toDate(get("bd_mtd")));
 
   // 전환가액 / 청구기간
-  // 실측 응답 키: cvrqpd_bgd / cvrqpd_edd (전환청구기간 시작일/종료일)
-  set("initialConversionPrice", toNumber(get("cv_prc", "ex_prc")));
-  set("minConversionPrice", toNumber(get("act_mktprcfl_cvprc_lwtrsprc")));
-  set("conversionStartDate", toDate(get("cvrqpd_bgd", "cv_rqsr_pd_bgd", "cv_rqsr_h_bgd")));
-  set("conversionEndDate", toDate(get("cvrqpd_edd", "cv_rqsr_pd_edd", "cv_rqsr_h_endd")));
+  // CB 실측 키: cv_prc / cvrqpd_bgd / cvrqpd_edd / act_mktprcfl_cvprc_lwtrsprc
+  // EB 는 ex_* / exrqpd_* / act_mktprcfl_exprc_lwtrsprc 로 대칭 명명될 가능성이 높음
+  // BW 는 신주인수권 관련 필드 (ss_* 계열)
+  set("initialConversionPrice", toNumber(get("cv_prc", "ex_prc", "ss_prc")));
+  set(
+    "minConversionPrice",
+    toNumber(
+      get(
+        "act_mktprcfl_cvprc_lwtrsprc",
+        "act_mktprcfl_exprc_lwtrsprc",
+        "act_mktprcfl_ssprc_lwtrsprc",
+      ),
+    ),
+  );
+  set(
+    "conversionStartDate",
+    toDate(
+      get(
+        "cvrqpd_bgd",
+        "exrqpd_bgd",
+        "ssrqpd_bgd",
+        "cv_rqsr_pd_bgd",
+        "ex_rqsr_pd_bgd",
+        "ss_rqsr_pd_bgd",
+        "cv_rqsr_h_bgd",
+        "ex_rqsr_h_bgd",
+      ),
+    ),
+  );
+  set(
+    "conversionEndDate",
+    toDate(
+      get(
+        "cvrqpd_edd",
+        "exrqpd_edd",
+        "ssrqpd_edd",
+        "cv_rqsr_pd_edd",
+        "ex_rqsr_pd_edd",
+        "ss_rqsr_pd_edd",
+        "cv_rqsr_h_endd",
+        "ex_rqsr_h_endd",
+      ),
+    ),
+  );
 
   // 풋옵션(조기상환청구권) / 콜옵션(매도청구권)
   // — DART 전환사채 정형 API는 이 필드들을 제공하지 않는다.
@@ -401,7 +440,7 @@ export async function POST(req: NextRequest) {
     let claudeStatus: string | undefined;
     let bodyExcerpt: string | undefined;
 
-    if (missingPutCall.length > 0 && process.env.ANTHROPIC_API_KEY && type === "CB") {
+    if (missingPutCall.length > 0 && process.env.ANTHROPIC_API_KEY) {
       try {
         const bodyText = await fetchDisclosureBodyText(rcpNo);
         bodyExcerpt = bodyText.slice(0, 2000);

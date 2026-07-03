@@ -88,10 +88,13 @@ export async function extractPutCallWithClaude(text: string): Promise<PutCallExt
         content: [
           {
             type: "text" as const,
-            text: `다음은 한국거래소 상장사의 전환사채 발행결정 공시 본문이다. \
+            text: `다음은 한국거래소 상장사의 메자닌 사채(전환사채 CB / 신주인수권부사채 BW / 교환사채 EB) 발행결정 공시 본문이다. \
 조기상환청구권(풋옵션)과 매도청구권(콜옵션) 조항에서 아래 필드를 추출해서 record_put_call_options 툴을 호출하라. \
 본문에 없는 필드는 아예 넣지 말고 생략할 것. 날짜는 YYYY-MM-DD로 정규화하라. \
-"연 4.0%의 이율" 처럼 %가 붙은 숫자는 4.0 처럼 number로 반환하라.\n\n---\n\n${excerpt}`,
+"연 4.0%의 이율" 처럼 %가 붙은 숫자는 4.0 처럼 number로 반환하라. \
+콜옵션의 경우 "매도청구권(Call Option) 매매대금 지급기일" 표에서 첫 행/마지막 행 날짜가 각각 시작/종료일이다. \
+콜옵션 비율은 보통 "매도청구권 행사 범위" 문단에 "발행가액의 30%" 형식으로 나온다. \
+콜옵션 금리는 매매가액 산식에서 "연 N%의 이율" 표현으로 나온다.\n\n---\n\n${excerpt}`,
           },
         ],
       },
