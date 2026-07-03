@@ -284,22 +284,24 @@ function mapDecisionToSchema(
   set("issueDate", toDate(get("pymd")));
   set("maturityDate", toDate(get("bd_mtd")));
 
-  // 전환가액 / 청구기간 (CB/BW에 한함; EB는 다른 필드일 수 있음)
+  // 전환가액 / 청구기간
+  // 실측 응답 키: cvrqpd_bgd / cvrqpd_edd (전환청구기간 시작일/종료일)
   set("initialConversionPrice", toNumber(get("cv_prc", "ex_prc")));
   set("minConversionPrice", toNumber(get("act_mktprcfl_cvprc_lwtrsprc")));
-  set("conversionStartDate", toDate(get("cv_rqsr_h_bgd", "ex_rqsr_h_bgd")));
-  set("conversionEndDate", toDate(get("cv_rqsr_h_endd", "ex_rqsr_h_endd")));
+  set("conversionStartDate", toDate(get("cvrqpd_bgd", "cv_rqsr_pd_bgd", "cv_rqsr_h_bgd")));
+  set("conversionEndDate", toDate(get("cvrqpd_edd", "cv_rqsr_pd_edd", "cv_rqsr_h_endd")));
 
-  // 풋옵션(조기상환청구권) — 신규 스키마 키
-  set("putOptionStartDate", toDate(get("atrs_rs_inh_h_bgd", "rs_inh_h_bgd")));
-  set("putOptionEndDate", toDate(get("atrs_rs_inh_h_endd", "rs_inh_h_endd")));
-  set("putOptionRate", toNumber(get("atrs_rs_inh_yr", "rs_inh_yr")));
+  // 풋옵션(조기상환청구권) / 콜옵션(매도청구권)
+  // — DART 전환사채 정형 API는 이 필드들을 제공하지 않는다.
+  // 후보 키를 몇 개 시도해두되, 대부분의 공시에서는 못 채워짐 (수동 입력 필요).
+  set("putOptionStartDate", toDate(get("rs_inh_pd_bgd", "atrs_rs_inh_h_bgd", "rs_inh_h_bgd")));
+  set("putOptionEndDate", toDate(get("rs_inh_pd_edd", "atrs_rs_inh_h_endd", "rs_inh_h_endd")));
+  set("putOptionRate", toNumber(get("rs_inh_yr", "atrs_rs_inh_yr")));
 
-  // 콜옵션(매도청구권)
-  set("callOptionStartDate", toDate(get("atrs_dlst_h_bgd", "dlst_h_bgd")));
-  set("callOptionEndDate", toDate(get("atrs_dlst_h_endd", "dlst_h_endd")));
-  set("callOptionRatio", toNumber(get("atrs_dlst_rt", "dlst_rt")));
-  set("callOptionRate", toNumber(get("atrs_dlst_yr", "dlst_yr")));
+  set("callOptionStartDate", toDate(get("dlst_pd_bgd", "atrs_dlst_h_bgd", "dlst_h_bgd")));
+  set("callOptionEndDate", toDate(get("dlst_pd_edd", "atrs_dlst_h_endd", "dlst_h_endd")));
+  set("callOptionRatio", toNumber(get("dlst_rt", "atrs_dlst_rt")));
+  set("callOptionRate", toNumber(get("dlst_yr", "atrs_dlst_yr")));
 
   return { data, filled, unfilled };
 }

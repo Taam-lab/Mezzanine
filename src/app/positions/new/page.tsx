@@ -201,9 +201,16 @@ function NewPositionContent() {
                     아래 폼에서 검토 후 저장해주세요.
                   </p>
                   {parseResult.failedFields.length > 0 && (
-                    <p className="text-xs text-yellow-700 mt-1">
-                      미추출 항목 ({parseResult.failedFields.length}개): {parseResult.failedFields.join(", ")}
-                    </p>
+                    <>
+                      <p className="text-xs text-yellow-700 mt-1">
+                        미추출 항목 ({parseResult.failedFields.length}개): {parseResult.failedFields.join(", ")}
+                      </p>
+                      {parseResult.failedFields.some((f: string) => f.startsWith("put") || f.startsWith("call")) && (
+                        <p className="text-[11px] text-gray-500 mt-0.5">
+                          * 풋옵션/콜옵션 조항은 DART 정형 API에 포함되지 않아 자동 추출이 불가능합니다. 수동 입력해주세요.
+                        </p>
+                      )}
+                    </>
                   )}
                   {(parseResult._rawDecision || parseResult._meta) && (
                     <details className="mt-2">
