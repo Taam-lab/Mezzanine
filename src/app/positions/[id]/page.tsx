@@ -93,11 +93,40 @@ interface PositionDetail {
   }>;
 }
 
+interface LivePrice {
+  price: number;
+  changeRate: number;
+  tradedAt?: string;
+}
+
 export default function PositionDetailPage() {
   const params = useParams();
   const router = useRouter();
   const [position, setPosition] = useState<PositionDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [livePrice, setLivePrice] = useState<LivePrice | null>(null);
+  const [refreshingPrice, setRefreshingPrice] = useState(false);
+
+  const ticker = position?.underlyingTicker;
+
+  async function refreshPrice(t: string) {
+    setRefreshingPrice(true);
+    try {
+      const res = await fetch(`/api/prices/${t}`);
+      if (res.ok) {
+        const data = await res.json();
+        setLivePrice({
+          price: data.price,
+          changeRate: data.changeRate,
+          tradedAt: data.tradedAt,
+        });
+      }
+    } catch {
+      // ignore — 기존 스냅샷으로 폴백
+    } finally {
+      setRefreshingPrice(false);
+    }
+  }
 
   useEffect(() => {
     fetch(`/api/positions/${params.id}`)
@@ -108,8 +137,15 @@ export default function PositionDetailPage() {
       .then((data) => {
         setPosition(data);
         setLoading(false);
+        if (data?.underlyingTicker) refreshPrice(data.underlyingTicker);
       });
   }, [params.id, router]);
+
+  useEffect(() => {
+    if (!ticker) return;
+    const id = setInterval(() => refreshPrice(ticker), 60_000);
+    return () => clearInterval(id);
+  }, [ticker]);
 
   if (loading) {
     return (
@@ -123,12 +159,14 @@ export default function PositionDetailPage() {
 
   if (!position) return null;
 
-  const latestPrice = position.priceSnapshots?.[0];
-  const isRise = (latestPrice?.changeRate ?? 0) > 0;
-  const isFall = (latestPrice?.changeRate ?? 0) < 0;
+  const snapshotPrice = position.priceSnapshots?.[0];
+  const currentPrice = livePrice?.price ?? snapshotPrice?.price;
+  const currentChangeRate = livePrice?.changeRate ?? snapshotPrice?.changeRate ?? 0;
+  const isRise = currentChangeRate > 0;
+  const isFall = currentChangeRate < 0;
   const parity =
-    latestPrice?.price && position.currentConversionPrice
-      ? (latestPrice.price / position.currentConversionPrice) * 100
+    currentPrice && position.currentConversionPrice
+      ? (currentPrice / position.currentConversionPrice) * 100
       : null;
 
   const chartData = position.priceSnapshots
@@ -185,10 +223,27 @@ export default function PositionDetailPage() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <Card>
             <CardContent className="py-3">
-              <p className="text-xs text-gray-500">현재가</p>
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-gray-500">현재가</p>
+                {ticker && (
+                  <button
+                    onClick={() => refreshPrice(ticker)}
+                    disabled={refreshingPrice}
+                    className="text-[10px] text-gray-400 hover:text-gray-700 disabled:opacity-50"
+                    title="네이버 실시간 시세 새로고침"
+                  >
+                    {refreshingPrice ? "..." : "↻"}
+                  </button>
+                )}
+              </div>
               <p className="text-xl font-bold tabular-nums text-gray-900">
-                {latestPrice ? formatKRW(latestPrice.price) : "-"}
+                {currentPrice ? formatKRW(currentPrice) : "-"}
               </p>
+              {livePrice?.tradedAt && (
+                <p className="text-[10px] text-gray-400 mt-0.5">
+                  네이버 {livePrice.tradedAt.slice(11, 16)}
+                </p>
+              )}
             </CardContent>
           </Card>
           <Card>
@@ -200,7 +255,7 @@ export default function PositionDetailPage() {
                 }`}
               >
                 {isRise ? <TrendingUp className="h-4 w-4" /> : isFall ? <TrendingDown className="h-4 w-4" /> : null}
-                {latestPrice ? formatPercent(latestPrice.changeRate) : "-"}
+                {currentPrice ? formatPercent(currentChangeRate) : "-"}
               </p>
             </CardContent>
           </Card>
