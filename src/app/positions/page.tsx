@@ -29,7 +29,6 @@ interface Position {
   maturityDate: string | null;
   currentConversionPrice: number | null;
   isActive: boolean;
-  priceSnapshots: Array<{ price: number; changeRate: number; snapshotAt: string }>;
 }
 
 interface LiveQuote {
@@ -46,15 +45,13 @@ export default function PositionsPage() {
   const [priceError, setPriceError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  async function refreshLivePrices(list: Position[]) {
-    const tickers = Array.from(
-      new Set(list.map((p) => p.underlyingTicker).filter((t) => /^\d{6}$/.test(t))),
-    );
-    if (tickers.length === 0) return;
+  async function refreshLivePricesByTickers(tickers: string[]) {
+    const uniq = Array.from(new Set(tickers.filter((t) => /^\d{6}$/.test(t))));
+    if (uniq.length === 0) return;
     setRefreshing(true);
     setPriceError(null);
     try {
-      const res = await fetch(`/api/prices?tickers=${tickers.join(",")}`);
+      const res = await fetch(`/api/prices?tickers=${uniq.join(",")}`);
       const data = await res.json();
       if (!res.ok) {
         setPriceError(data.error || `시세 조회 실패 (HTTP ${res.status})`);
@@ -104,19 +101,40 @@ export default function PositionsPage() {
   }
 
   useEffect(() => {
+    // 재방문 시 즉시 시세 조회를 시작하기 위한 티커 캐시
+    const cached =
+      typeof window !== "undefined" ? sessionStorage.getItem("positionTickers") : null;
+    if (cached) {
+      try {
+        const tickers = JSON.parse(cached) as string[];
+        if (Array.isArray(tickers) && tickers.length > 0) {
+          refreshLivePricesByTickers(tickers);
+        }
+      } catch {
+        // ignore corrupt cache
+      }
+    }
+
     fetch("/api/positions")
       .then((r) => r.json())
       .then((data) => {
         const list = Array.isArray(data) ? data : [];
         setPositions(list);
         setLoading(false);
-        if (list.length > 0) refreshLivePrices(list);
+        const tickers = list.map((p: Position) => p.underlyingTicker);
+        if (tickers.length > 0) {
+          sessionStorage.setItem("positionTickers", JSON.stringify(tickers));
+          refreshLivePricesByTickers(tickers);
+        }
       });
   }, []);
 
   useEffect(() => {
     if (positions.length === 0) return;
-    const id = setInterval(() => refreshLivePrices(positions), 60_000);
+    const id = setInterval(
+      () => refreshLivePricesByTickers(positions.map((p) => p.underlyingTicker)),
+      60_000,
+    );
     return () => clearInterval(id);
   }, [positions]);
 
@@ -144,7 +162,7 @@ export default function PositionsPage() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => refreshLivePrices(positions)}
+              onClick={() => refreshLivePricesByTickers(positions.map((p) => p.underlyingTicker))}
               disabled={refreshing || positions.length === 0}
               title="실시간 시세 새로고침"
             >
@@ -210,9 +228,8 @@ export default function PositionsPage() {
                 <tbody className="divide-y divide-gray-50">
                   {filtered.map((pos) => {
                     const live = livePrices[pos.underlyingTicker];
-                    const snapshot = pos.priceSnapshots?.[0];
-                    const price = live?.price ?? snapshot?.price;
-                    const changeRate = live?.changeRate ?? snapshot?.changeRate ?? 0;
+                    const price = live?.price;
+                    const changeRate = live?.changeRate ?? 0;
                     const isRise = changeRate > 0;
                     const isFall = changeRate < 0;
                     const parity =

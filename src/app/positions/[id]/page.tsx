@@ -130,6 +130,14 @@ export default function PositionDetailPage() {
   }
 
   useEffect(() => {
+    // 종목 상세 로드 전에 캐시된 티커로 시세 호출을 병렬 선행
+    const cacheKey = `positionTicker:${params.id}`;
+    const cachedTicker =
+      typeof window !== "undefined" ? sessionStorage.getItem(cacheKey) : null;
+    if (cachedTicker && /^\d{6}$/.test(cachedTicker)) {
+      refreshPrice(cachedTicker);
+    }
+
     fetch(`/api/positions/${params.id}`)
       .then((r) => {
         if (!r.ok) router.push("/positions");
@@ -138,7 +146,11 @@ export default function PositionDetailPage() {
       .then((data) => {
         setPosition(data);
         setLoading(false);
-        if (data?.underlyingTicker) refreshPrice(data.underlyingTicker);
+        if (data?.underlyingTicker) {
+          sessionStorage.setItem(cacheKey, data.underlyingTicker);
+          // 캐시로 이미 조회했으면 재호출 생략 (60s interval이 곧 갱신함)
+          if (data.underlyingTicker !== cachedTicker) refreshPrice(data.underlyingTicker);
+        }
       });
   }, [params.id, router]);
 

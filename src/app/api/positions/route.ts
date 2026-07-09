@@ -10,18 +10,24 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const active = searchParams.get("active") !== "false";
 
+  // 목록 페이지가 실제로 렌더하는 컬럼만 select — priceSnapshots/riskCheckResults/_count는
+  // 여기서 안 씀 (라이브 시세는 /api/prices에서, 위험지표는 상세 페이지에서만 조회)
   const positions = await prisma.position.findMany({
     where: { isActive: active },
-    include: {
-      priceSnapshots: {
-        orderBy: { snapshotAt: "desc" },
-        take: 1,
-      },
-      riskCheckResults: {
-        orderBy: { checkedAt: "desc" },
-        distinct: ["checkId"],
-      },
-      _count: { select: { alerts: true } },
+    select: {
+      id: true,
+      bondCode: true,
+      assetName: true,
+      underlyingTicker: true,
+      underlyingCompanyName: true,
+      underlyingMarket: true,
+      mezzanineType: true,
+      investmentType: true,
+      investmentAmount: true,
+      issueDate: true,
+      maturityDate: true,
+      currentConversionPrice: true,
+      isActive: true,
     },
     orderBy: { createdAt: "desc" },
   });
