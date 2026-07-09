@@ -1,10 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { fetchDisclosureBodyText } from "@/lib/dartScrape";
-import { extractPutCallWithClaude, type PutCallExtraction } from "@/lib/claudeExtract";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
-export const maxDuration = 45; // 스크래핑 + Claude 추출 여유
+export const maxDuration = 20;
 
 // ──────────────────────────────────────────────
 // Schema & helpers
@@ -425,63 +423,9 @@ export async function POST(req: NextRequest) {
     const row = list.find((r) => r.rcept_no === rcpNo) ?? list[0];
 
     // 5단계: 스키마 매핑
+    // 풋/콜옵션 조항은 DART 정형 API에 없으므로 항상 미추출 → 사용자 수동 입력.
     const { data, filled, unfilled } = mapDecisionToSchema(row, type, meta);
     data.sourceDisclosureUrl = url;
-
-    // 6단계: 정형 API가 못 넘겨준 풋/콜옵션 필드는 원문 스크래핑 + Claude로 폴백
-    // (ANTHROPIC_API_KEY가 설정돼 있고 CB일 때만)
-    const putCallKeys: Array<keyof PutCallExtraction> = [
-      "putOptionStartDate",
-      "putOptionEndDate",
-      "putOptionRate",
-      "callOptionStartDate",
-      "callOptionEndDate",
-      "callOptionRatio",
-      "callOptionRate",
-    ];
-    const missingPutCall = putCallKeys.filter((k) => unfilled.includes(k));
-    let claudeStatus: string | undefined;
-    let bodyExcerpt: string | undefined;
-
-    let claudeExtracted: PutCallExtraction | undefined;
-    if (missingPutCall.length > 0 && process.env.ANTHROPIC_API_KEY) {
-      // 1) 스크래핑
-      let bodyText: string;
-      try {
-        bodyText = await fetchDisclosureBodyText(rcpNo);
-        bodyExcerpt = bodyText.slice(0, 2000);
-      } catch (err) {
-        claudeStatus = `스크래핑 실패: ${(err instanceof Error ? err.message : String(err)).slice(0, 200)}`;
-        bodyText = "";
-      }
-
-      // 2) Claude 추출
-      if (bodyText) {
-        try {
-          claudeExtracted = await extractPutCallWithClaude(bodyText);
-          const extractedKeys = Object.keys(claudeExtracted);
-          const merged: string[] = [];
-          for (const k of putCallKeys) {
-            if (claudeExtracted[k] !== undefined && !filled.includes(k)) {
-              (data as Record<string, unknown>)[k] = claudeExtracted[k];
-              filled.push(k);
-              merged.push(k);
-            }
-          }
-          const filledSet = new Set(filled);
-          for (let i = unfilled.length - 1; i >= 0; i--) {
-            if (filledSet.has(unfilled[i])) unfilled.splice(i, 1);
-          }
-          claudeStatus =
-            `본문 ${bodyText.length}자 스크래핑 → Claude 반환 ${extractedKeys.length}개 (${extractedKeys.join(",") || "없음"}) → 병합 ${merged.length}개`;
-        } catch (err) {
-          claudeStatus =
-            `본문 ${bodyText.length}자 스크래핑 → Claude 실패: ${(err instanceof Error ? err.message : String(err)).slice(0, 200)}`;
-        }
-      }
-    } else if (missingPutCall.length > 0 && !process.env.ANTHROPIC_API_KEY) {
-      claudeStatus = "ANTHROPIC_API_KEY 미설정 (수동 입력 필요)";
-    }
 
     return NextResponse.json({
       data,
@@ -489,9 +433,6 @@ export async function POST(req: NextRequest) {
       failedFields: unfilled,
       _meta: meta,
       _rawDecision: row,
-      _claudeStatus: claudeStatus,
-      _claudeExtracted: claudeExtracted,
-      _bodyExcerpt: bodyExcerpt,
     });
   } catch (err) {
     console.error("[parse-disclosure]", err);
