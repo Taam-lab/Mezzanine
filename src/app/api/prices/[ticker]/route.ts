@@ -1,14 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { fetchNaverQuote } from "@/lib/naverPrice";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-/**
- * GET /api/prices/[ticker]
- * DB에 저장된 최신 PriceSnapshot 반환.
- * (CHECK API는 고정 IP 워커가 폴링해서 스냅샷 저장 → 웹은 DB만 읽음)
- */
 export async function GET(
   _req: NextRequest,
   { params }: { params: { ticker: string } },
@@ -21,24 +17,38 @@ export async function GET(
     );
   }
 
-  const snapshot = await prisma.priceSnapshot.findFirst({
-    where: { position: { underlyingTicker: ticker, isActive: true } },
-    orderBy: { snapshotAt: "desc" },
-    select: { price: true, changeRate: true, snapshotAt: true, source: true },
-  });
+  try {
+    const quote = await fetchNaverQuote(ticker);
 
-  if (!snapshot) {
+    const positions = await prisma.position.findMany({
+      where: { underlyingTicker: ticker, isActive: true },
+      select: { id: true },
+    });
+
+    if (positions.length > 0) {
+      const marketCapWon =
+        quote.marketCap !== undefined ? BigInt(Math.floor(quote.marketCap * 100_000_000)) : null;
+      const volumeBig = quote.volume !== undefined ? BigInt(Math.floor(quote.volume)) : null;
+
+      await prisma.priceSnapshot.createMany({
+        data: positions.map((p: { id: string }) => ({
+          positionId: p.id,
+          price: quote.price,
+          changeRate: quote.changeRate,
+          volume: volumeBig,
+          marketCap: marketCapWon,
+          source: "naver",
+        })),
+      });
+    }
+
+    return NextResponse.json({ ...quote, savedFor: positions.length });
+  } catch (err) {
+    console.error("[prices]", err);
+    const detail = err instanceof Error ? err.message : String(err);
     return NextResponse.json(
-      { error: "저장된 시세 스냅샷이 없습니다.", ticker },
-      { status: 404 },
+      { error: `네이버 시세 조회 실패: ${detail.slice(0, 200)}` },
+      { status: 502 },
     );
   }
-
-  return NextResponse.json({
-    ticker,
-    price: snapshot.price,
-    changeRate: snapshot.changeRate ?? 0,
-    tradedAt: snapshot.snapshotAt.toISOString(),
-    source: snapshot.source,
-  });
 }

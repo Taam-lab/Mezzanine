@@ -99,23 +99,12 @@ interface LivePrice {
   tradedAt?: string;
 }
 
-function formatRelativeTime(iso: string): string {
-  const diffMs = Date.now() - new Date(iso).getTime();
-  const diffMin = Math.floor(diffMs / 60000);
-  if (diffMin < 1) return "방금";
-  if (diffMin < 60) return `${diffMin}분 전`;
-  const diffHr = Math.floor(diffMin / 60);
-  if (diffHr < 24) return `${diffHr}시간 전`;
-  return `${Math.floor(diffHr / 24)}일 전`;
-}
-
 export default function PositionDetailPage() {
   const params = useParams();
   const router = useRouter();
   const [position, setPosition] = useState<PositionDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [livePrice, setLivePrice] = useState<LivePrice | null>(null);
-  const [priceError, setPriceError] = useState<string | null>(null);
   const [refreshingPrice, setRefreshingPrice] = useState(false);
 
   const ticker = position?.underlyingTicker;
@@ -124,19 +113,16 @@ export default function PositionDetailPage() {
     setRefreshingPrice(true);
     try {
       const res = await fetch(`/api/prices/${t}`);
-      const data = await res.json();
       if (res.ok) {
+        const data = await res.json();
         setLivePrice({
           price: data.price,
           changeRate: data.changeRate,
           tradedAt: data.tradedAt,
         });
-        setPriceError(null);
-      } else {
-        setPriceError(data.error || `HTTP ${res.status}`);
       }
-    } catch (err) {
-      setPriceError(err instanceof Error ? err.message : "네트워크 오류");
+    } catch {
+      // ignore — 기존 스냅샷으로 폴백
     } finally {
       setRefreshingPrice(false);
     }
@@ -244,7 +230,7 @@ export default function PositionDetailPage() {
                     onClick={() => refreshPrice(ticker)}
                     disabled={refreshingPrice}
                     className="text-[10px] text-gray-400 hover:text-gray-700 disabled:opacity-50"
-                    title="실시간 시세 새로고침"
+                    title="네이버 실시간 시세 새로고침"
                   >
                     {refreshingPrice ? "..." : "↻"}
                   </button>
@@ -253,14 +239,9 @@ export default function PositionDetailPage() {
               <p className="text-xl font-bold tabular-nums text-gray-900">
                 {currentPrice ? formatKRW(currentPrice) : "-"}
               </p>
-              {livePrice?.tradedAt && !priceError && (
+              {livePrice?.tradedAt && (
                 <p className="text-[10px] text-gray-400 mt-0.5">
-                  {formatRelativeTime(livePrice.tradedAt)}
-                </p>
-              )}
-              {priceError && (
-                <p className="text-[10px] text-red-500 mt-0.5" title={priceError}>
-                  시세 없음
+                  네이버 {livePrice.tradedAt.slice(11, 16)}
                 </p>
               )}
             </CardContent>

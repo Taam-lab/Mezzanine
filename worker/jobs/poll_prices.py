@@ -1,33 +1,17 @@
 """
-주가 데이터 폴링 Job — KOSCOM CHECK API 사용
-- Vercel serverless는 IP가 매번 바뀌어 CHECK 화이트리스트와 안 맞으므로
-  고정 IP 환경(사내 서버)에 배포된 이 워커에서만 CHECK API를 직접 호출한다.
-- 활성 포지션의 종목코드를 CHECK로 조회 → PriceSnapshot에 저장.
-- 웹 앱은 이 스냅샷만 읽는다.
+주가 데이터 폴링 Job
+- pykrx: 일봉 데이터 (장 마감 후)
+- 네이버 금융 스크래핑: 장중 현재가
+- 한국투자증권 API: 키 등록 시 자동 전환 (Phase 2)
 """
 
 import os
 import asyncio
-import uuid
 import httpx
-from datetime import datetime
+from datetime import datetime, date
 from sqlalchemy import text
 
 from db import AsyncSessionLocal
-
-CHECK_URL = "https://checkapi.koscom.co.kr/stock/m001/basic_info_all"
-CHECK_CUST_ID = os.getenv("CHECK_CUST_ID", "")
-CHECK_AUTH_KEY = os.getenv("CHECK_AUTH_KEY", "")
-
-# 필요한 필드만 요청 (응답 최소화)
-DATA_FIELDS = ",".join([
-    "F15001",  # 현재가
-    "F15004",  # 등락률
-    "F15015",  # 거래량
-    "F15028",  # 시가총액
-    "F03003",  # 전일종가
-    "F16002",  # 한글종목명
-])
 
 PRICE_CHANGE_THRESHOLD = float(os.getenv("PRICE_CHANGE_THRESHOLD", "10.0"))
 
@@ -45,63 +29,69 @@ async def get_price_threshold(session) -> float:
     return PRICE_CHANGE_THRESHOLD
 
 
-def _to_num(v):
-    if v is None or v == "":
-        return None
+async def fetch_naver_price(ticker: str) -> dict | None:
+    """네이버 금융에서 현재가 스크래핑"""
+    url = f"https://finance.naver.com/item/main.nhn?code={ticker}"
     try:
-        return float(str(v).replace(",", ""))
-    except (ValueError, TypeError):
-        return None
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(
+                url,
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
+            )
+            html = r.text
 
+            # 현재가 추출
+            import re
+            price_match = re.search(r'<p class="no_today">.*?<span class="blind">([\d,]+)</span>', html, re.DOTALL)
+            change_match = re.search(r'<span class="[^"]*(?:up|down)[^"]*">.*?<span class="blind">([\d.]+)%</span>', html, re.DOTALL)
+            direction_match = re.search(r'<span class="(up|down)">', html)
 
-async def fetch_check_price(client: httpx.AsyncClient, ticker: str) -> dict | None:
-    """CHECK API로 현재가 조회. form-urlencoded body."""
-    if not CHECK_CUST_ID or not CHECK_AUTH_KEY:
-        print("[Price] CHECK_CUST_ID / CHECK_AUTH_KEY 미설정")
-        return None
-    try:
-        r = await client.post(
-            CHECK_URL,
-            data={
-                "cust_id": CHECK_CUST_ID,
-                "auth_key": CHECK_AUTH_KEY,
-                "jcode": ticker,
-                "data_list": DATA_FIELDS,
-            },
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-            timeout=8.0,
-        )
-        r.raise_for_status()
-        data = r.json()
-        if not data.get("success"):
-            msg = data.get("message")
-            if isinstance(msg, dict):
-                print(f"[Price] CHECK 실패: {ticker} — {msg.get('errmsg')} ({msg.get('desc')})")
-            else:
-                print(f"[Price] CHECK 실패: {ticker} — {msg}")
-            return None
-        results = data.get("results") or data.get("result") or data.get("data") or []
-        if not results:
-            return None
-        row = results[0]
-        price = _to_num(row.get("F15001"))
-        if price is None:
-            return None
-        return {
-            "price": price,
-            "change_rate": _to_num(row.get("F15004")) or 0.0,
-            "volume": _to_num(row.get("F15015")),
-            "market_cap": _to_num(row.get("F15028")),
-            "source": "check",
-        }
+            if price_match:
+                price = float(price_match.group(1).replace(",", ""))
+                change_rate = 0.0
+                if change_match:
+                    change_rate = float(change_match.group(1))
+                    if direction_match and direction_match.group(1) == "down":
+                        change_rate = -change_rate
+
+                return {"price": price, "change_rate": change_rate, "source": "naver"}
     except Exception as e:
-        print(f"[Price] CHECK 요청 실패: {ticker} — {e}")
-        return None
+        print(f"[Price] 네이버 스크래핑 실패: {ticker} — {e}")
+    return None
+
+
+async def fetch_pykrx_price(ticker: str) -> dict | None:
+    """pykrx로 일봉 데이터 조회 (장 마감 후)"""
+    try:
+        import pykrx.stock as stock
+        today_str = date.today().strftime("%Y%m%d")
+        df = stock.get_market_ohlcv_by_date(today_str, today_str, ticker)
+        if not df.empty:
+            row = df.iloc[-1]
+            close = float(row.get("종가", 0))
+            open_p = float(row.get("시가", close))
+            change_rate = ((close - open_p) / open_p * 100) if open_p else 0.0
+
+            # 시가총액
+            market_df = stock.get_market_cap_by_date(today_str, today_str, ticker)
+            market_cap = int(market_df.iloc[-1]["시가총액"]) if not market_df.empty else None
+
+            return {
+                "price": close,
+                "change_rate": round(change_rate, 2),
+                "source": "pykrx",
+                "market_cap": market_cap,
+            }
+    except Exception as e:
+        print(f"[Price] pykrx 조회 실패: {ticker} — {e}")
+    return None
 
 
 async def save_price_snapshot(session, position_id: str, price_data: dict):
-    volume = int(price_data["volume"]) if price_data.get("volume") is not None else None
-    market_cap = int(price_data["market_cap"]) if price_data.get("market_cap") is not None else None
+    """주가 스냅샷 저장 및 급등락 알림 처리"""
+    import uuid
+
+    snap_id = str(uuid.uuid4())
     await session.execute(
         text("""
             INSERT INTO price_snapshots
@@ -109,88 +99,115 @@ async def save_price_snapshot(session, position_id: str, price_data: dict):
             VALUES (:id, :pid, :price, :cr, :vol, :mc, :src, :sat)
         """),
         {
-            "id": str(uuid.uuid4()),
+            "id": snap_id,
             "pid": position_id,
-            "price": price_data["price"],
+            "price": price_data.get("price", 0),
             "cr": price_data.get("change_rate", 0),
-            "vol": volume,
-            "mc": market_cap,
-            "src": price_data.get("source", "check"),
+            "vol": price_data.get("volume"),
+            "mc": price_data.get("market_cap"),
+            "src": price_data.get("source", "unknown"),
             "sat": datetime.now(),
         },
     )
+    await session.commit()
 
 
 async def create_price_alert(session, position_id: str, company_name: str,
                               price: float, change_rate: float):
+    """급등락 알림 생성"""
+    import uuid
+
     direction = "급등" if change_rate > 0 else "급락"
+    alert_id = str(uuid.uuid4())
     await session.execute(
         text("""
             INSERT INTO alerts (id, position_id, alert_type, severity, title, body, created_at)
             VALUES (:id, :pid, 'PRICE_MOVEMENT', 'CRITICAL', :title, :body, :cat)
         """),
         {
-            "id": str(uuid.uuid4()),
+            "id": alert_id,
             "pid": position_id,
             "title": f"{company_name} 주가 {direction} ({change_rate:+.1f}%)",
             "body": f"현재가: {price:,.0f}원",
             "cat": datetime.now(),
         },
     )
-    print(f"[Price] 🚨 급등락: {company_name} {change_rate:+.1f}%")
+    await session.commit()
+    print(f"[Price] 🚨 급등락 알림: {company_name} {change_rate:+.1f}%")
 
 
-async def _poll_impl(only_market_hours: bool):
+async def poll_prices_realtime():
+    """장중 주가 폴링"""
     now = datetime.now()
-    if only_market_hours:
-        if now.weekday() >= 5 or not (9 <= now.hour < 16):
-            return
-    print(f"[Price] CHECK 폴링 시작 — {now:%Y-%m-%d %H:%M:%S}")
+    hour = now.hour
+    weekday = now.weekday()
+
+    # 평일 장중 (09:00~15:30)만 실행
+    if weekday >= 5 or not (9 <= hour < 16):
+        return
+
+    print(f"[Price] 장중 주가 폴링 시작 — {now}")
 
     async with AsyncSessionLocal() as session:
         threshold = await get_price_threshold(session)
 
         result = await session.execute(
-            text("SELECT id, underlying_ticker, underlying_company_name FROM positions WHERE is_active = TRUE")
+            text("SELECT id, underlying_ticker, underlying_company_name FROM positions WHERE is_active = 1")
         )
         positions = [{"id": r[0], "ticker": r[1], "company_name": r[2]} for r in result.fetchall()]
 
-        # 종목코드 기준으로 그룹화 (같은 종목을 참조하는 여러 포지션에 동일 스냅샷)
-        by_ticker: dict[str, list[dict]] = {}
-        for p in positions:
-            by_ticker.setdefault(p["ticker"], []).append(p)
+        processed = set()
+        for pos in positions:
+            ticker = pos["ticker"]
+            if ticker in processed:
+                continue
+            processed.add(ticker)
 
-        async with httpx.AsyncClient() as client:
-            # 8개씩 병렬 (CHECK 서버 부담 완화)
-            tickers = list(by_ticker.keys())
-            saved = 0
-            for i in range(0, len(tickers), 8):
-                batch = tickers[i:i + 8]
-                quotes = await asyncio.gather(
-                    *(fetch_check_price(client, t) for t in batch),
-                    return_exceptions=False,
-                )
-                for t, quote in zip(batch, quotes):
-                    if not quote:
-                        continue
-                    for p in by_ticker[t]:
-                        await save_price_snapshot(session, p["id"], quote)
-                        saved += 1
-                        cr = quote.get("change_rate", 0)
-                        if abs(cr) >= threshold:
-                            await create_price_alert(
-                                session, p["id"], p["company_name"], quote["price"], cr
-                            )
-                await session.commit()
+            price_data = await fetch_naver_price(ticker)
+            if not price_data:
+                continue
 
-    print(f"[Price] CHECK 폴링 완료 — {saved}건 저장")
+            same_ticker = [p for p in positions if p["ticker"] == ticker]
+            for p in same_ticker:
+                await save_price_snapshot(session, p["id"], price_data)
 
+                change_rate = price_data.get("change_rate", 0)
+                if abs(change_rate) >= threshold:
+                    await create_price_alert(
+                        session, p["id"], p["company_name"],
+                        price_data["price"], change_rate
+                    )
 
-async def poll_prices_realtime():
-    """장중(평일 09:00~16:00) 실시간 폴링"""
-    await _poll_impl(only_market_hours=True)
+            await asyncio.sleep(0.3)
+
+    print(f"[Price] 장중 폴링 완료")
 
 
 async def daily_price_close():
-    """장 마감 종가 확정 (16:30 크론)"""
-    await _poll_impl(only_market_hours=False)
+    """장 마감 후 종가 확정 (pykrx)"""
+    print(f"[Price] 장 마감 종가 수집 시작 — {datetime.now()}")
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("SELECT id, underlying_ticker, underlying_company_name FROM positions WHERE is_active = 1")
+        )
+        positions = [{"id": r[0], "ticker": r[1], "company_name": r[2]} for r in result.fetchall()]
+
+        processed = set()
+        for pos in positions:
+            ticker = pos["ticker"]
+            if ticker in processed:
+                continue
+            processed.add(ticker)
+
+            price_data = await fetch_pykrx_price(ticker)
+            if not price_data:
+                price_data = await fetch_naver_price(ticker)
+            if not price_data:
+                continue
+
+            same_ticker = [p for p in positions if p["ticker"] == ticker]
+            for p in same_ticker:
+                await save_price_snapshot(session, p["id"], price_data)
+
+    print(f"[Price] 장 마감 종가 수집 완료")

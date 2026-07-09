@@ -103,7 +103,7 @@ export default function PositionsPage() {
               size="sm"
               onClick={() => refreshLivePrices(positions)}
               disabled={refreshing || positions.length === 0}
-              title="실시간 시세 새로고침"
+              title="네이버 실시간 시세 새로고침"
             >
               {refreshing ? "새로고침 중..." : "시세 새로고침"}
             </Button>

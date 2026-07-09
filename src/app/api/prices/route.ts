@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { fetchNaverQuote, type NaverQuote } from "@/lib/naverPrice";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 /**
  * GET /api/prices?tickers=A,B,C
- * 요청한 종목코드들의 최신 스냅샷을 {티커: 시세} 맵으로 반환.
+ * 네이버 실시간 시세를 병렬로 조회해 반환.
+ * 조회에 성공한 종목의 스냅샷도 DB에 저장.
  */
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -27,32 +29,66 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "한 번에 최대 100개까지 조회 가능합니다." }, { status: 400 });
   }
 
-  // 각 종목별로 최신 스냅샷 1건씩 조회
-  // (PriceSnapshot에는 종목코드 컬럼이 없으므로 positions 조인으로 접근)
-  const rows = await prisma.$queryRaw<
-    Array<{ ticker: string; price: number; change_rate: number | null; snapshot_at: Date; source: string | null }>
-  >`
-    SELECT DISTINCT ON (p.underlying_ticker)
-      p.underlying_ticker AS ticker,
-      ps.price AS price,
-      ps.change_rate AS change_rate,
-      ps.snapshot_at AS snapshot_at,
-      ps.source AS source
-    FROM price_snapshots ps
-    JOIN positions p ON p.id = ps.position_id
-    WHERE p.underlying_ticker = ANY(${tickers}) AND p.is_active = TRUE
-    ORDER BY p.underlying_ticker, ps.snapshot_at DESC
-  `;
-
-  const map: Record<string, { price: number; changeRate: number; tradedAt: string; source: string | null }> = {};
-  for (const row of rows) {
-    map[row.ticker] = {
-      price: row.price,
-      changeRate: row.change_rate ?? 0,
-      tradedAt: row.snapshot_at.toISOString(),
-      source: row.source,
-    };
+  // 네이버는 병렬 요청에 관대하지만, 안전하게 8개씩 배치로 나눠 던짐
+  const CHUNK = 8;
+  const results: Array<NaverQuote | { ticker: string; error: string }> = [];
+  for (let i = 0; i < tickers.length; i += CHUNK) {
+    const chunk = tickers.slice(i, i + CHUNK);
+    const settled = await Promise.allSettled(chunk.map((t) => fetchNaverQuote(t)));
+    settled.forEach((r, idx) => {
+      const t = chunk[idx];
+      if (r.status === "fulfilled") {
+        results.push(r.value);
+      } else {
+        const msg = r.reason instanceof Error ? r.reason.message : String(r.reason);
+        results.push({ ticker: t, error: msg.slice(0, 150) });
+      }
+    });
   }
 
-  return NextResponse.json({ quotes: map, count: rows.length });
+  // 성공한 종목에 대해 스냅샷 저장 (활성 포지션이 있는 것만)
+  const successful = results.filter((r): r is NaverQuote => "price" in r);
+  if (successful.length > 0) {
+    const tickerSet = successful.map((q) => q.ticker);
+    const positions = await prisma.position.findMany({
+      where: { underlyingTicker: { in: tickerSet }, isActive: true },
+      select: { id: true, underlyingTicker: true },
+    });
+    const byTicker = new Map<string, NaverQuote>(successful.map((q) => [q.ticker, q]));
+    interface SnapshotRow {
+      positionId: string;
+      price: number;
+      changeRate: number;
+      volume: bigint | null;
+      marketCap: bigint | null;
+      source: string;
+    }
+    const snapshots: SnapshotRow[] = [];
+    for (const p of positions as Array<{ id: string; underlyingTicker: string }>) {
+      const q = byTicker.get(p.underlyingTicker);
+      if (!q) continue;
+      snapshots.push({
+        positionId: p.id,
+        price: q.price,
+        changeRate: q.changeRate,
+        volume: q.volume !== undefined ? BigInt(Math.floor(q.volume)) : null,
+        marketCap: q.marketCap !== undefined ? BigInt(Math.floor(q.marketCap * 100_000_000)) : null,
+        source: "naver",
+      });
+    }
+    if (snapshots.length > 0) {
+      await prisma.priceSnapshot.createMany({ data: snapshots });
+    }
+  }
+
+  // 종목코드 → 결과 매핑으로 반환
+  const map: Record<string, NaverQuote | { error: string }> = {};
+  for (const r of results) {
+    if ("price" in r) {
+      map[r.ticker] = r;
+    } else {
+      map[r.ticker] = { error: r.error };
+    }
+  }
+  return NextResponse.json({ quotes: map, count: successful.length });
 }
