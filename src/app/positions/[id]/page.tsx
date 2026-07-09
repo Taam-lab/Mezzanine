@@ -62,6 +62,7 @@ interface PositionDetail {
   putOptionRate: number | null;
   putOptionStartDate: string | null;
   putOptionEndDate: string | null;
+  putOptionSchedule: string | null;
   callOptionRatio: number | null;
   callOptionRate: number | null;
   callOptionStartDate: string | null;
@@ -106,20 +107,47 @@ interface LivePrice {
 }
 
 /**
- * 조기상환청구권 "다음 행사가능 기간":
- * - 오늘 < 시작일 → "YYYY-MM-DD 부터 행사 가능"
- * - 시작일 ≤ 오늘 ≤ 종료일 → "현재 ~ 종료일까지 행사 가능"
- * - 오늘 > 종료일 → "행사 종료"
+ * 조기상환청구권 "다음 행사가능 기간".
+ * 회차별 (From, To) 배열이 있으면 오늘 기준으로 아직 지나지 않은 첫 회차를 찾음.
+ * - 오늘 > 그 회차의 To 이면 다음 회차로 (이미 지난 회차 스킵)
+ * - 오늘 < From 이면 "From ~ To 부터 행사 가능"
+ * - From ≤ 오늘 ≤ To 이면 "현재 ~ To 까지 행사 가능"
+ * - 남은 회차가 없으면 "행사 종료"
+ *
+ * 배열이 없으면 단일 start/end 로 폴백.
  */
 function nextExerciseWindow(
+  scheduleJson: string | null,
   startIso: string | null,
   endIso: string | null,
 ): string {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  if (scheduleJson) {
+    try {
+      const rows = JSON.parse(scheduleJson) as Array<{ from: string; to: string }>;
+      if (Array.isArray(rows) && rows.length > 0) {
+        for (const row of rows) {
+          const from = new Date(row.from);
+          const to = new Date(row.to);
+          if (today > to) continue; // 지난 회차
+          if (today < from) {
+            return `${formatDate(row.from)} ~ ${formatDate(row.to)} 부터 행사 가능`;
+          }
+          // from ≤ today ≤ to
+          return `현재 ~ ${formatDate(row.to)} 까지 행사 가능`;
+        }
+        return "행사 종료";
+      }
+    } catch {
+      // JSON 깨졌으면 폴백
+    }
+  }
+
   if (!startIso || !endIso) return "-";
   const start = new Date(startIso);
   const end = new Date(endIso);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
   if (today < start) return `${formatDate(startIso)} 부터 행사 가능`;
   if (today <= end) return `현재 ~ ${formatDate(endIso)} 까지 행사 가능`;
   return "행사 종료";
@@ -426,7 +454,7 @@ export default function PositionDetailPage() {
                     rows: [
                       ["풋옵션 수익률", position.putOptionRate !== null ? formatPercent(position.putOptionRate) : "-"],
                       ["풋옵션 행사 가능기간", position.putOptionStartDate ? `${formatDate(position.putOptionStartDate)} ~ ${formatDate(position.putOptionEndDate)}` : "-"],
-                      ["다음 행사가능 기간", nextExerciseWindow(position.putOptionStartDate, position.putOptionEndDate)],
+                      ["다음 행사가능 기간", nextExerciseWindow(position.putOptionSchedule, position.putOptionStartDate, position.putOptionEndDate)],
                     ] as Array<[string, string | null]>,
                   },
                   {

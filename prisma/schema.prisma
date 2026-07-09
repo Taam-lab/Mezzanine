@@ -51,6 +51,7 @@ model Position {
   putOptionRate          Float?    @map("put_option_rate")
   putOptionStartDate     DateTime? @map("put_option_start_date")
   putOptionEndDate       DateTime? @map("put_option_end_date")
+  putOptionSchedule      String?   @map("put_option_schedule") // JSON [{from,to},...]
   callOptionRatio        Float?    @map("call_option_ratio")
   callOptionStartDate    DateTime? @map("call_option_start_date")
   callOptionEndDate      DateTime? @map("call_option_end_date")

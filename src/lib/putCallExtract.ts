@@ -20,10 +20,16 @@
  *   매매가액 산식: ... 연 X.X%의 이율 ...
  */
 
+export interface PutOptionScheduleRow {
+  from: string; // YYYY-MM-DD
+  to: string;
+}
+
 export interface PutCallExtraction {
   putOptionStartDate?: string;
   putOptionEndDate?: string;
   putOptionRate?: number;
+  putOptionSchedule?: string; // JSON-stringified PutOptionScheduleRow[]
   callOptionStartDate?: string;
   callOptionEndDate?: string;
   callOptionRatio?: number;
@@ -121,6 +127,7 @@ export function extractPutCall(text: string): PutCallExtraction {
     if (rows.length > 0) {
       result.putOptionStartDate = rows[0].from;
       result.putOptionEndDate = rows[rows.length - 1].to;
+      result.putOptionSchedule = JSON.stringify(rows);
     } else {
       // 2순위 폴백: 표가 없거나 다른 서식일 때 — "조기상환청구기간" 뒤 날짜 목록에서 첫/마지막
       const periodMatch = putSec.match(/조기상환\s*청구\s*기간[^\d]{0,50}/);

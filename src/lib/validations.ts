@@ -65,6 +65,7 @@ export const positionSchema = z.object({
   putOptionRate: optionalNumber((n) => n.min(0).max(100)),
   putOptionStartDate: z.string().optional(),
   putOptionEndDate: z.string().optional(),
+  putOptionSchedule: z.string().optional(),
   callOptionRatio: optionalNumber((n) => n.min(0).max(100)),
   callOptionStartDate: z.string().optional(),
   callOptionEndDate: z.string().optional(),

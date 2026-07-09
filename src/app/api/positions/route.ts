@@ -73,6 +73,7 @@ export async function POST(req: NextRequest) {
         putOptionRate: data.putOptionRate ?? null,
         putOptionStartDate: data.putOptionStartDate ? new Date(data.putOptionStartDate) : null,
         putOptionEndDate: data.putOptionEndDate ? new Date(data.putOptionEndDate) : null,
+        putOptionSchedule: data.putOptionSchedule || null,
         callOptionRatio: data.callOptionRatio ?? null,
         callOptionStartDate: data.callOptionStartDate ? new Date(data.callOptionStartDate) : null,
         callOptionEndDate: data.callOptionEndDate ? new Date(data.callOptionEndDate) : null,
