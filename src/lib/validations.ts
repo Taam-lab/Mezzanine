@@ -26,18 +26,18 @@ export const loginSchema = z.object({
 /**
  * react-hook-form이 `valueAsNumber: true` 로 등록된 빈 input을 `NaN` 으로 넘기는데,
  * Zod의 `z.number()` 는 NaN 을 거부해서 optional이어도 저장이 막힌다.
- * NaN / "" / null / undefined 를 모두 undefined 로 정규화한 뒤 검증.
+ * z.union([...])으로 NaN을 받아 통과시키고 transform으로 undefined 처리.
+ *
+ * (z.preprocess를 쓰면 input 타입이 unknown으로 바뀌어 zodResolver 제네릭과 어긋난다.)
  */
 const optionalNumber = (rule?: (n: z.ZodNumber) => z.ZodNumber) => {
-  const base = z.number();
-  return z.preprocess(
-    (v: unknown) => {
-      if (v === "" || v === null || v === undefined) return undefined;
-      if (typeof v === "number" && Number.isNaN(v)) return undefined;
-      return v;
-    },
-    (rule ? rule(base) : base).optional(),
-  );
+  const validated = rule ? rule(z.number()) : z.number();
+  return z
+    .union([validated, z.nan()])
+    .optional()
+    .transform((v: number | undefined): number | undefined =>
+      typeof v === "number" && !Number.isNaN(v) ? v : undefined,
+    );
 };
 
 export const positionSchema = z.object({
