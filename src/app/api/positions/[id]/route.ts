@@ -71,10 +71,34 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 }
 
 export async function DELETE(_req: NextRequest, { params }: { params: { id: string } }) {
-  await prisma.position.update({
-    where: { id: params.id },
-    data: { isActive: false },
-  });
+  const positionId = params.id;
 
-  return NextResponse.json({ ok: true });
+  // 스키마에 onDelete: Cascade가 없어서 FK 순서대로 트랜잭션으로 지운다.
+  //
+  // 의존성:
+  //   AlertUserStatus → Alert → Position
+  //   ConversionPriceHistory → Position + Disclosure
+  //   Disclosure → Position
+  //   NewsItem / PriceSnapshot / FinancialSnapshot / RiskCheckResult → Position
+  try {
+    await prisma.$transaction([
+      prisma.alertUserStatus.deleteMany({ where: { alert: { positionId } } }),
+      prisma.alert.deleteMany({ where: { positionId } }),
+      prisma.conversionPriceHistory.deleteMany({ where: { positionId } }),
+      prisma.disclosure.deleteMany({ where: { positionId } }),
+      prisma.newsItem.deleteMany({ where: { positionId } }),
+      prisma.priceSnapshot.deleteMany({ where: { positionId } }),
+      prisma.financialSnapshot.deleteMany({ where: { positionId } }),
+      prisma.riskCheckResult.deleteMany({ where: { positionId } }),
+      prisma.position.delete({ where: { id: positionId } }),
+    ]);
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    console.error("[positions DELETE]", err);
+    const detail = err instanceof Error ? err.message : String(err);
+    return NextResponse.json(
+      { error: `삭제 실패: ${detail.slice(0, 300)}` },
+      { status: 500 },
+    );
+  }
 }

@@ -81,7 +81,7 @@ export default function PositionsPage() {
   }
 
   async function deletePosition(id: string, assetName: string) {
-    if (!confirm(`"${assetName}" 종목을 삭제하시겠습니까?\n(비활성 처리되며 데이터는 유지됩니다.)`)) {
+    if (!confirm(`"${assetName}" 종목을 삭제하시겠습니까?\n관련 스냅샷·공시·뉴스·알림·이력 데이터도 모두 함께 영구 삭제됩니다.`)) {
       return;
     }
     setDeletingId(id);
