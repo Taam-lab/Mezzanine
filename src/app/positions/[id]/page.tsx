@@ -99,6 +99,16 @@ interface LivePrice {
   tradedAt?: string;
 }
 
+function formatRelativeTime(iso: string): string {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1) return "방금";
+  if (diffMin < 60) return `${diffMin}분 전`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}시간 전`;
+  return `${Math.floor(diffHr / 24)}일 전`;
+}
+
 export default function PositionDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -245,12 +255,12 @@ export default function PositionDetailPage() {
               </p>
               {livePrice?.tradedAt && !priceError && (
                 <p className="text-[10px] text-gray-400 mt-0.5">
-                  CHECK {livePrice.tradedAt.slice(11, 16)}
+                  {formatRelativeTime(livePrice.tradedAt)}
                 </p>
               )}
               {priceError && (
                 <p className="text-[10px] text-red-500 mt-0.5" title={priceError}>
-                  실시간 조회 실패
+                  시세 없음
                 </p>
               )}
             </CardContent>
