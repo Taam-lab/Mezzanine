@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
+import { fetchDisclosureBodyText } from "@/lib/dartScrape";
+import { extractPutCall, type PutCallExtraction } from "@/lib/putCallExtract";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
-export const maxDuration = 20;
+export const maxDuration = 30; // 스크래핑 여유
 
 // ──────────────────────────────────────────────
 // Schema & helpers
@@ -423,9 +425,44 @@ export async function POST(req: NextRequest) {
     const row = list.find((r) => r.rcept_no === rcpNo) ?? list[0];
 
     // 5단계: 스키마 매핑
-    // 풋/콜옵션 조항은 DART 정형 API에 없으므로 항상 미추출 → 사용자 수동 입력.
     const { data, filled, unfilled } = mapDecisionToSchema(row, type, meta);
     data.sourceDisclosureUrl = url;
+
+    // 6단계: 풋/콜 조항은 정형 API에 없으므로 원문 스크래핑 + 정규식 추출
+    const putCallKeys: Array<keyof PutCallExtraction> = [
+      "putOptionStartDate",
+      "putOptionEndDate",
+      "putOptionRate",
+      "callOptionStartDate",
+      "callOptionEndDate",
+      "callOptionRatio",
+      "callOptionRate",
+    ];
+    const missingPutCall = putCallKeys.filter((k) => unfilled.includes(k));
+    let scrapeStatus: string | undefined;
+    let extracted: PutCallExtraction | undefined;
+
+    if (missingPutCall.length > 0) {
+      try {
+        const bodyText = await fetchDisclosureBodyText(rcpNo);
+        extracted = extractPutCall(bodyText);
+        const merged: string[] = [];
+        for (const k of putCallKeys) {
+          if (extracted[k] !== undefined && !filled.includes(k)) {
+            (data as Record<string, unknown>)[k] = extracted[k];
+            filled.push(k);
+            merged.push(k);
+          }
+        }
+        const filledSet = new Set(filled);
+        for (let i = unfilled.length - 1; i >= 0; i--) {
+          if (filledSet.has(unfilled[i])) unfilled.splice(i, 1);
+        }
+        scrapeStatus = `본문 ${bodyText.length}자 스크래핑 → 풋/콜 ${merged.length}개 추출 (${merged.join(",") || "없음"})`;
+      } catch (err) {
+        scrapeStatus = `스크래핑 실패: ${(err instanceof Error ? err.message : String(err)).slice(0, 200)}`;
+      }
+    }
 
     return NextResponse.json({
       data,
@@ -433,6 +470,8 @@ export async function POST(req: NextRequest) {
       failedFields: unfilled,
       _meta: meta,
       _rawDecision: row,
+      _scrapeStatus: scrapeStatus,
+      _extractedPutCall: extracted,
     });
   } catch (err) {
     console.error("[parse-disclosure]", err);
