@@ -28,7 +28,43 @@ interface Position {
   issueDate: string | null;
   maturityDate: string | null;
   currentConversionPrice: number | null;
+  putOptionStartDate: string | null;
+  putOptionEndDate: string | null;
+  putOptionSchedule: string | null;
   isActive: boolean;
+}
+
+/**
+ * 조기상환청구권 다음 행사가능 회차를 짧게 표기 ("YYYY-MM-DD ~ YYYY-MM-DD").
+ * 목록 셀 안이라 문장이 아니라 날짜 범위만 반환.
+ */
+function nextPutWindow(
+  scheduleJson: string | null,
+  startIso: string | null,
+  endIso: string | null,
+): string {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const fmt = (iso: string) => iso.slice(0, 10);
+
+  if (scheduleJson) {
+    try {
+      const rows = JSON.parse(scheduleJson) as Array<{ from: string; to: string }>;
+      if (Array.isArray(rows) && rows.length > 0) {
+        for (const row of rows) {
+          if (today > new Date(row.to)) continue;
+          return `${fmt(row.from)} ~ ${fmt(row.to)}`;
+        }
+        return "종료";
+      }
+    } catch {
+      // fall through
+    }
+  }
+  if (!startIso || !endIso) return "-";
+  const end = new Date(endIso);
+  if (today > end) return "종료";
+  return `${fmt(startIso)} ~ ${fmt(endIso)}`;
 }
 
 interface LiveQuote {
@@ -220,7 +256,9 @@ export default function PositionsPage() {
                     <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">투자금액</th>
                     <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">현재가</th>
                     <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">등락률</th>
+                    <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">전환/교환가액</th>
                     <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">패리티</th>
+                    <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">다음 Put</th>
                     <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">만기일</th>
                     <th className="px-2 py-3"></th>
                   </tr>
@@ -293,6 +331,9 @@ export default function PositionsPage() {
                             <span className="text-gray-400 text-sm">-</span>
                           )}
                         </td>
+                        <td className="px-4 py-3 text-right tabular-nums text-sm text-gray-900">
+                          {pos.currentConversionPrice ? formatKRW(pos.currentConversionPrice) : "-"}
+                        </td>
                         <td className="px-4 py-3 text-right tabular-nums text-sm">
                           {parity !== null ? (
                             <span
@@ -305,6 +346,9 @@ export default function PositionsPage() {
                           ) : (
                             "-"
                           )}
+                        </td>
+                        <td className="px-4 py-3 text-center tabular-nums text-xs text-gray-600 whitespace-nowrap">
+                          {nextPutWindow(pos.putOptionSchedule, pos.putOptionStartDate, pos.putOptionEndDate)}
                         </td>
                         <td className="px-4 py-3 text-center text-sm text-gray-600">
                           {formatDate(pos.maturityDate)}
