@@ -107,20 +107,27 @@ export function extractPutCall(text: string): PutCallExtraction {
     // 조기상환은 3개월마다 청구권 발생하는 표가 만기까지 이어지므로 넉넉하게 5000자
     const putSec = text.slice(putIdx, putIdx + 5000);
 
-    // 시작/종료일: "조기상환청구기간" 뒤 첫 2개의 날짜
-    const periodMatch = putSec.match(/조기상환\s*청구\s*기간[^\d]{0,50}/);
-    if (periodMatch) {
-      const start = periodMatch.index! + periodMatch[0].length;
-      // 다음 큰 섹션 헤더 나오기 전까지만 훑음
-      const nextSecRel = putSec.slice(start).search(/\d{1,2}\.\s*(?:매도|콜|기타|이자|원금|납입)/);
-      const end = nextSecRel === -1 ? putSec.length : start + nextSecRel;
-      const dates = extractAllDates(putSec.slice(start, end));
-      if (dates.length >= 1) result.putOptionStartDate = dates[0];
-      if (dates.length >= 2) result.putOptionEndDate = dates[dates.length - 1];
+    // 1순위: 표 행 패턴 "N차 <From date> <To date>" 을 직접 매칭.
+    // 표 뒤에 만기일·이자지급일 등 다른 날짜가 있어도 여기 안 걸림.
+    // 날짜 구분자: - / . 년월일, 공백/문자로 두 날짜 사이 구분 (10-40자)
+    const rowRe = /(?:\d{1,3}|[제])\s*차\D{0,20}(\d{4})[년\-./\s]{1,3}(\d{1,2})[월\-./\s]{1,3}(\d{1,2})[일]?[\s\S]{1,40}?(\d{4})[년\-./\s]{1,3}(\d{1,2})[월\-./\s]{1,3}(\d{1,2})[일]?/g;
+    const rows: Array<{ from: string; to: string }> = [];
+    let rm: RegExpExecArray | null;
+    while ((rm = rowRe.exec(putSec)) !== null) {
+      const from = normalizeDate(rm[1], rm[2], rm[3]);
+      const to = normalizeDate(rm[4], rm[5], rm[6]);
+      rows.push({ from, to });
+    }
+    if (rows.length > 0) {
+      result.putOptionStartDate = rows[0].from;
+      result.putOptionEndDate = rows[rows.length - 1].to;
     } else {
-      // 대체: 풋옵션 섹션 전체에서 첫 2개 날짜 (다른 섹션 헤더 전까지)
-      const nextSecRel = putSec.search(/\d{1,2}\.\s*(?:매도|콜|기타|이자|원금|납입)/);
-      const trimmed = nextSecRel === -1 ? putSec : putSec.slice(0, nextSecRel);
+      // 2순위 폴백: 표가 없거나 다른 서식일 때 — "조기상환청구기간" 뒤 날짜 목록에서 첫/마지막
+      const periodMatch = putSec.match(/조기상환\s*청구\s*기간[^\d]{0,50}/);
+      const scanStart = periodMatch ? periodMatch.index! + periodMatch[0].length : 0;
+      const nextSecRel = putSec.slice(scanStart).search(/\d{1,2}\.\s*(?:매도|콜|기타|이자|원금|납입)/);
+      const scanEnd = nextSecRel === -1 ? putSec.length : scanStart + nextSecRel;
+      const trimmed = putSec.slice(scanStart, scanEnd);
       const dates = extractAllDates(trimmed);
       if (dates.length >= 1) result.putOptionStartDate = dates[0];
       if (dates.length >= 2) result.putOptionEndDate = dates[dates.length - 1];
