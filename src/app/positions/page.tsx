@@ -6,7 +6,7 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
-import { Plus, TrendingUp, TrendingDown, Search } from "lucide-react";
+import { Plus, TrendingUp, TrendingDown, Search, Trash2 } from "lucide-react";
 import {
   formatKRW,
   formatPercent,
@@ -43,6 +43,8 @@ export default function PositionsPage() {
   const [search, setSearch] = useState("");
   const [livePrices, setLivePrices] = useState<Record<string, LiveQuote>>({});
   const [refreshing, setRefreshing] = useState(false);
+  const [priceError, setPriceError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   async function refreshLivePrices(list: Position[]) {
     const tickers = Array.from(
@@ -50,21 +52,54 @@ export default function PositionsPage() {
     );
     if (tickers.length === 0) return;
     setRefreshing(true);
+    setPriceError(null);
     try {
       const res = await fetch(`/api/prices?tickers=${tickers.join(",")}`);
-      if (!res.ok) return;
-      const data = (await res.json()) as {
+      const data = await res.json();
+      if (!res.ok) {
+        setPriceError(data.error || `시세 조회 실패 (HTTP ${res.status})`);
+        return;
+      }
+      const quotes = (data as {
         quotes: Record<string, { price?: number; changeRate?: number; error?: string }>;
-      };
+      }).quotes;
       const next: Record<string, LiveQuote> = {};
-      for (const [t, q] of Object.entries(data.quotes)) {
+      const failed: string[] = [];
+      for (const [t, q] of Object.entries(quotes)) {
         if (typeof q.price === "number") {
           next[t] = { price: q.price, changeRate: q.changeRate ?? 0 };
+        } else if (q.error) {
+          failed.push(`${t}: ${q.error}`);
         }
       }
       setLivePrices(next);
+      if (failed.length > 0 && Object.keys(next).length === 0) {
+        setPriceError(failed.slice(0, 3).join(" / "));
+      }
+    } catch (err) {
+      setPriceError(err instanceof Error ? err.message : "네트워크 오류");
     } finally {
       setRefreshing(false);
+    }
+  }
+
+  async function deletePosition(id: string, assetName: string) {
+    if (!confirm(`"${assetName}" 종목을 삭제하시겠습니까?\n(비활성 처리되며 데이터는 유지됩니다.)`)) {
+      return;
+    }
+    setDeletingId(id);
+    try {
+      const res = await fetch(`/api/positions/${id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        alert(data.error || `삭제 실패 (HTTP ${res.status})`);
+        return;
+      }
+      setPositions((prev) => prev.filter((p) => p.id !== id));
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "네트워크 오류");
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -98,12 +133,20 @@ export default function PositionsPage() {
         <div className="flex items-center justify-between">
           <h1 className="text-xl font-bold text-gray-900">보유 종목</h1>
           <div className="flex items-center gap-2">
+            {priceError && (
+              <span
+                className="text-xs text-red-500 max-w-md truncate"
+                title={priceError}
+              >
+                시세 조회 실패
+              </span>
+            )}
             <Button
               variant="outline"
               size="sm"
               onClick={() => refreshLivePrices(positions)}
               disabled={refreshing || positions.length === 0}
-              title="네이버 실시간 시세 새로고침"
+              title="실시간 시세 새로고침"
             >
               {refreshing ? "새로고침 중..." : "시세 새로고침"}
             </Button>
@@ -161,6 +204,7 @@ export default function PositionsPage() {
                     <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">등락률</th>
                     <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">패리티</th>
                     <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">만기일</th>
+                    <th className="px-2 py-3"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
@@ -247,6 +291,19 @@ export default function PositionsPage() {
                         </td>
                         <td className="px-4 py-3 text-center text-sm text-gray-600">
                           {formatDate(pos.maturityDate)}
+                        </td>
+                        <td className="px-2 py-3 text-center">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              deletePosition(pos.id, pos.assetName);
+                            }}
+                            disabled={deletingId === pos.id}
+                            className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 disabled:opacity-30 disabled:cursor-not-allowed"
+                            title="종목 삭제"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
                         </td>
                       </tr>
                     );

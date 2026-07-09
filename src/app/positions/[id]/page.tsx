@@ -15,6 +15,7 @@ import {
   ExternalLink,
   Clock,
   BarChart2,
+  Trash2,
 } from "lucide-react";
 import {
   formatKRW,
@@ -211,12 +212,32 @@ export default function PositionDetailPage() {
               <p className="text-sm text-gray-500 mt-0.5">{position.assetName}</p>
             </div>
           </div>
-          <Link href={`/positions/${position.id}/edit`}>
-            <Button variant="outline" size="sm">
-              <Edit2 className="h-4 w-4" />
-              수정
+          <div className="flex items-center gap-2">
+            <Link href={`/positions/${position.id}/edit`}>
+              <Button variant="outline" size="sm">
+                <Edit2 className="h-4 w-4" />
+                수정
+              </Button>
+            </Link>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                if (!confirm(`"${position.assetName}" 종목을 삭제하시겠습니까?\n(비활성 처리되며 데이터는 유지됩니다.)`)) return;
+                const res = await fetch(`/api/positions/${position.id}`, { method: "DELETE" });
+                if (res.ok) {
+                  router.push("/positions");
+                } else {
+                  const data = await res.json().catch(() => ({}));
+                  alert(data.error || `삭제 실패 (HTTP ${res.status})`);
+                }
+              }}
+              className="text-red-600 hover:bg-red-50"
+            >
+              <Trash2 className="h-4 w-4" />
+              삭제
             </Button>
-          </Link>
+          </div>
         </div>
 
         {/* 주가 요약 */}
