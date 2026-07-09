@@ -76,4 +76,8 @@ export const positionSchema = z.object({
 
 export type SignupInput = z.infer<typeof signupSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
-export type PositionInput = z.infer<typeof positionSchema>;
+
+// `z.infer` = output type. transform이 optional 필드를 required로 만들어
+// react-hook-form의 resolver 제네릭과 어긋난다. 폼용은 input 타입, 서버 처리용은 output 타입.
+export type PositionInput = z.input<typeof positionSchema>;
+export type PositionOutput = z.output<typeof positionSchema>;
