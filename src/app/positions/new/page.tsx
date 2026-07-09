@@ -114,6 +114,15 @@ function NewPositionContent() {
     }
   }
 
+  function onValidationError(errs: Record<string, { message?: string }>) {
+    // 필드 에러가 시야 밖에 있어 저장이 눌리지 않는 것처럼 보이는 경우 대비
+    const first = Object.entries(errs)
+      .map(([k, v]) => `${k}: ${v?.message ?? "invalid"}`)
+      .slice(0, 3)
+      .join("\n");
+    alert(`저장 전 검증 실패:\n${first}`);
+  }
+
   const isAutoFilled = (field: string) =>
     parseResult?.autoFilledFields.includes(field) ?? false;
 
@@ -282,7 +291,7 @@ function NewPositionContent() {
 
         {/* 공통: 직접 입력 폼 (manual 탭 또는 자동 파싱 결과 편집) */}
         {(tab === "manual" || tab === "disclosure") && (
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
+          <form onSubmit={handleSubmit(onSubmit, onValidationError)} className="space-y-5">
             {/* 기본 정보 */}
             <Card>
               <CardHeader>

@@ -6,26 +6,72 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
-  const position = await prisma.position.findUnique({
-    where: { id: params.id },
-    include: {
-      priceSnapshots: { orderBy: { snapshotAt: "desc" }, take: 30 },
-      financialSnapshots: { orderBy: [{ fiscalYear: "desc" }, { fiscalQuarter: "desc" }], take: 8 },
-      riskCheckResults: {
-        orderBy: { checkedAt: "desc" },
-        distinct: ["checkId"],
-      },
-      disclosures: { orderBy: { filedAt: "desc" }, take: 20 },
-      newsItems: { orderBy: { publishedAt: "desc" }, take: 20 },
-      alerts: { orderBy: { createdAt: "desc" }, take: 10 },
-      conversionPriceHistory: { orderBy: { adjustedAt: "asc" } },
-      owner: { select: { name: true, email: true } },
-    },
-  });
+  const id = params.id;
+
+  // 8개 관계를 하나의 include로 묶으면 Prisma가 순차 서브쿼리로 처리하는 경우가 있어서
+  // 상세 페이지가 눈에 띄게 느렸다. 관계별로 independent query를 병렬로 실행.
+  const [
+    position,
+    priceSnapshots,
+    financialSnapshots,
+    riskCheckResults,
+    disclosures,
+    newsItems,
+    alerts,
+    conversionPriceHistory,
+  ] = await Promise.all([
+    prisma.position.findUnique({
+      where: { id },
+      include: { owner: { select: { name: true, email: true } } },
+    }),
+    prisma.priceSnapshot.findMany({
+      where: { positionId: id },
+      orderBy: { snapshotAt: "desc" },
+      take: 30,
+    }),
+    prisma.financialSnapshot.findMany({
+      where: { positionId: id },
+      orderBy: [{ fiscalYear: "desc" }, { fiscalQuarter: "desc" }],
+      take: 8,
+    }),
+    prisma.riskCheckResult.findMany({
+      where: { positionId: id },
+      orderBy: { checkedAt: "desc" },
+      distinct: ["checkId"],
+    }),
+    prisma.disclosure.findMany({
+      where: { positionId: id },
+      orderBy: { filedAt: "desc" },
+      take: 20,
+    }),
+    prisma.newsItem.findMany({
+      where: { positionId: id },
+      orderBy: { publishedAt: "desc" },
+      take: 20,
+    }),
+    prisma.alert.findMany({
+      where: { positionId: id },
+      orderBy: { createdAt: "desc" },
+      take: 10,
+    }),
+    prisma.conversionPriceHistory.findMany({
+      where: { positionId: id },
+      orderBy: { adjustedAt: "asc" },
+    }),
+  ]);
 
   if (!position) return NextResponse.json({ error: "Not Found" }, { status: 404 });
 
-  return NextResponse.json(position);
+  return NextResponse.json({
+    ...position,
+    priceSnapshots,
+    financialSnapshots,
+    riskCheckResults,
+    disclosures,
+    newsItems,
+    alerts,
+    conversionPriceHistory,
+  });
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {

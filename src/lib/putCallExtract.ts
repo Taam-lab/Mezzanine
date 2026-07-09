@@ -104,7 +104,8 @@ export function extractPutCall(text: string): PutCallExtraction {
   // ─────────────────────────────────────────────
   const putIdx = text.search(/조기상환청구권|조기상환\s*청구\s*기간|Put\s*Option/i);
   if (putIdx !== -1) {
-    const putSec = text.slice(putIdx, putIdx + 2500);
+    // 조기상환은 3개월마다 청구권 발생하는 표가 만기까지 이어지므로 넉넉하게 5000자
+    const putSec = text.slice(putIdx, putIdx + 5000);
 
     // 시작/종료일: "조기상환청구기간" 뒤 첫 2개의 날짜
     const periodMatch = putSec.match(/조기상환\s*청구\s*기간[^\d]{0,50}/);
@@ -112,7 +113,7 @@ export function extractPutCall(text: string): PutCallExtraction {
       const start = periodMatch.index! + periodMatch[0].length;
       // 다음 큰 섹션 헤더 나오기 전까지만 훑음
       const nextSecRel = putSec.slice(start).search(/\d{1,2}\.\s*(?:매도|콜|기타|이자|원금|납입)/);
-      const end = nextSecRel === -1 ? Math.min(start + 500, putSec.length) : start + nextSecRel;
+      const end = nextSecRel === -1 ? putSec.length : start + nextSecRel;
       const dates = extractAllDates(putSec.slice(start, end));
       if (dates.length >= 1) result.putOptionStartDate = dates[0];
       if (dates.length >= 2) result.putOptionEndDate = dates[dates.length - 1];

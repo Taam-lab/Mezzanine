@@ -60,7 +60,12 @@ interface PositionDetail {
   conversionStartDate: string | null;
   conversionEndDate: string | null;
   putOptionRate: number | null;
+  putOptionStartDate: string | null;
+  putOptionEndDate: string | null;
   callOptionRatio: number | null;
+  callOptionRate: number | null;
+  callOptionStartDate: string | null;
+  callOptionEndDate: string | null;
   seriesNumber: number | null;
   sourceDisclosureUrl: string | null;
   note: string | null;
@@ -386,8 +391,11 @@ export default function PositionDetailPage() {
                     ["최저 전환가", position.minConversionPrice ? formatKRW(position.minConversionPrice) : "-"],
                     ["현재 전환가", position.currentConversionPrice ? formatKRW(position.currentConversionPrice) : "-"],
                     ["전환 가능 기간", position.conversionStartDate ? `${formatDate(position.conversionStartDate)} ~ ${formatDate(position.conversionEndDate)}` : "-"],
-                    ["풋옵션 금리", position.putOptionRate !== null ? formatPercent(position.putOptionRate) : "-"],
+                    ["풋옵션 행사기간", position.putOptionStartDate ? `${formatDate(position.putOptionStartDate)} ~ ${formatDate(position.putOptionEndDate)}` : "-"],
+                    ["풋옵션 수익률", position.putOptionRate !== null ? formatPercent(position.putOptionRate) : "-"],
+                    ["콜옵션 행사기간", position.callOptionStartDate ? `${formatDate(position.callOptionStartDate)} ~ ${formatDate(position.callOptionEndDate)}` : "-"],
                     ["콜옵션 비율", position.callOptionRatio !== null ? formatPercent(position.callOptionRatio) : "-"],
+                    ["콜옵션 금리", position.callOptionRate !== null ? formatPercent(position.callOptionRate) : "-"],
                     ["회차", position.seriesNumber ? `제${position.seriesNumber}회` : "-"],
                   ].map(([label, value]) => (
                     <div key={label as string}>
