@@ -62,9 +62,13 @@ function nextPutWindow(
     }
   }
   if (!startIso || !endIso) return "-";
+  const start = new Date(startIso);
   const end = new Date(endIso);
-  if (today > end) return "종료";
-  return `${fmt(startIso)} ~ ${fmt(endIso)}`;
+  // 시작일이 미래면 다음 회차는 그 범위 그대로.
+  // (schedule 없이 저장된 이전 데이터에서 end가 오염돼 있어도 start 기준으로 판단)
+  if (today < start) return `${fmt(startIso)} ~ ${fmt(endIso)}`;
+  if (today <= end) return `현재 ~ ${fmt(endIso)}`;
+  return "종료";
 }
 
 interface LiveQuote {
@@ -258,6 +262,7 @@ export default function PositionsPage() {
                     <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">등락률</th>
                     <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">전환/교환가액</th>
                     <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">패리티</th>
+                    <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">발행일</th>
                     <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">다음 Put</th>
                     <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">만기일</th>
                     <th className="px-2 py-3"></th>
@@ -346,6 +351,9 @@ export default function PositionsPage() {
                           ) : (
                             "-"
                           )}
+                        </td>
+                        <td className="px-4 py-3 text-center text-sm text-gray-600">
+                          {formatDate(pos.issueDate)}
                         </td>
                         <td className="px-4 py-3 text-center tabular-nums text-xs text-gray-600 whitespace-nowrap">
                           {nextPutWindow(pos.putOptionSchedule, pos.putOptionStartDate, pos.putOptionEndDate)}
