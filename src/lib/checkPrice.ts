@@ -60,29 +60,48 @@ export async function fetchQuote(ticker: string): Promise<Quote> {
     throw new Error("CHECK_CUST_ID / CHECK_AUTH_KEY 환경변수가 설정되지 않았습니다.");
   }
 
+  // CHECK API는 form-urlencoded body를 받는 것으로 확인됨
+  const form = new URLSearchParams({
+    cust_id: custId,
+    auth_key: authKey,
+    jcode: ticker,
+    data_list: DATA_FIELDS.join(","),
+  });
+
   const res = await fetch(CHECK_URL, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      cust_id: custId,
-      auth_key: authKey,
-      jcode: ticker,
-      data_list: DATA_FIELDS.join(","),
-    }),
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: form.toString(),
     signal: AbortSignal.timeout(6000),
   });
 
-  if (!res.ok) throw new Error(`CHECK HTTP ${res.status}`);
+  const rawText = await res.text();
+  if (!res.ok) throw new Error(`CHECK HTTP ${res.status}: ${rawText.slice(0, 200)}`);
 
-  const data = (await res.json()) as CheckResponse;
-  if (!data.success) {
+  let data: CheckResponse;
+  try {
+    data = JSON.parse(rawText) as CheckResponse;
+  } catch {
+    throw new Error(`CHECK 응답 JSON 파싱 실패: ${rawText.slice(0, 200)}`);
+  }
+
+  if (data.success === false) {
     const err = data.message?.errmsg ?? "unknown";
     const desc = data.message?.desc ?? "";
     throw new Error(`CHECK 응답 실패: ${err}${desc ? ` (${desc})` : ""}`);
   }
 
-  const row = data.results?.[0];
-  if (!row) throw new Error("CHECK 응답에 데이터 없음");
+  // results 필드명이 다를 수 있으니 후보 몇 개 시도
+  const rawObj = data as unknown as Record<string, unknown>;
+  const list =
+    (Array.isArray(rawObj.results) ? rawObj.results : undefined) ??
+    (Array.isArray(rawObj.result) ? rawObj.result : undefined) ??
+    (Array.isArray(rawObj.data) ? rawObj.data : undefined) ??
+    (Array.isArray(rawObj.list) ? rawObj.list : undefined);
+  const row = list?.[0] as Record<string, unknown> | undefined;
+  if (!row) {
+    throw new Error(`CHECK 응답에 데이터 없음. 응답 본문: ${rawText.slice(0, 300)}`);
+  }
 
   const price = toNum(row.F15001);
   if (price === undefined) throw new Error("현재가(F15001) 파싱 실패");
