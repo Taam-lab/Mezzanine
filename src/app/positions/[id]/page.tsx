@@ -105,6 +105,26 @@ interface LivePrice {
   tradedAt?: string;
 }
 
+/**
+ * 조기상환청구권 "다음 행사가능 기간":
+ * - 오늘 < 시작일 → "YYYY-MM-DD 부터 행사 가능"
+ * - 시작일 ≤ 오늘 ≤ 종료일 → "현재 ~ 종료일까지 행사 가능"
+ * - 오늘 > 종료일 → "행사 종료"
+ */
+function nextExerciseWindow(
+  startIso: string | null,
+  endIso: string | null,
+): string {
+  if (!startIso || !endIso) return "-";
+  const start = new Date(startIso);
+  const end = new Date(endIso);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  if (today < start) return `${formatDate(startIso)} 부터 행사 가능`;
+  if (today <= end) return `현재 ~ ${formatDate(endIso)} 까지 행사 가능`;
+  return "행사 종료";
+}
+
 export default function PositionDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -375,35 +395,63 @@ export default function PositionDetailPage() {
               <CardHeader>
                 <CardTitle>메자닌 투자 정보</CardTitle>
               </CardHeader>
-              <CardContent>
-                <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
-                  {[
-                    ["채권종목번호", position.bondCode],
-                    ["기초자산", `${position.underlyingCompanyName} (${position.underlyingTicker})`],
-                    ["형태", MEZZANINE_TYPE_LABEL[position.mezzanineType] || position.mezzanineType],
-                    ["투자구분", INVESTMENT_TYPE_LABEL[position.investmentType] || position.investmentType],
-                    ["투자금액", position.investmentAmount ? formatKRW(Number(position.investmentAmount)) : "-"],
-                    ["발행일", formatDate(position.issueDate)],
-                    ["만기일", formatDate(position.maturityDate)],
-                    ["표면금리", position.couponRate !== null ? formatPercent(position.couponRate) : "-"],
-                    ["만기이자율(YTM)", position.ytm !== null ? formatPercent(position.ytm) : "-"],
-                    ["최초 전환가", position.initialConversionPrice ? formatKRW(position.initialConversionPrice) : "-"],
-                    ["최저 전환가", position.minConversionPrice ? formatKRW(position.minConversionPrice) : "-"],
-                    ["현재 전환가", position.currentConversionPrice ? formatKRW(position.currentConversionPrice) : "-"],
-                    ["전환 가능 기간", position.conversionStartDate ? `${formatDate(position.conversionStartDate)} ~ ${formatDate(position.conversionEndDate)}` : "-"],
-                    ["풋옵션 행사기간", position.putOptionStartDate ? `${formatDate(position.putOptionStartDate)} ~ ${formatDate(position.putOptionEndDate)}` : "-"],
-                    ["풋옵션 수익률", position.putOptionRate !== null ? formatPercent(position.putOptionRate) : "-"],
-                    ["콜옵션 행사기간", position.callOptionStartDate ? `${formatDate(position.callOptionStartDate)} ~ ${formatDate(position.callOptionEndDate)}` : "-"],
-                    ["콜옵션 비율", position.callOptionRatio !== null ? formatPercent(position.callOptionRatio) : "-"],
-                    ["콜옵션 금리", position.callOptionRate !== null ? formatPercent(position.callOptionRate) : "-"],
-                    ["회차", position.seriesNumber ? `제${position.seriesNumber}회` : "-"],
-                  ].map(([label, value]) => (
-                    <div key={label as string}>
-                      <dt className="text-gray-500 text-xs">{label}</dt>
-                      <dd className="text-gray-900 font-medium mt-0.5">{value || "-"}</dd>
-                    </div>
-                  ))}
-                </dl>
+              <CardContent className="space-y-5">
+                {[
+                  {
+                    heading: "채권 기본 정보",
+                    rows: [
+                      ["채권종목번호", position.bondCode],
+                      ["기초자산", `${position.underlyingCompanyName} (${position.underlyingTicker})`],
+                      ["형태", MEZZANINE_TYPE_LABEL[position.mezzanineType] || position.mezzanineType],
+                      ["회차", position.seriesNumber ? `제${position.seriesNumber}회` : "-"],
+                      ["투자구분", INVESTMENT_TYPE_LABEL[position.investmentType] || position.investmentType],
+                      ["투자금액", position.investmentAmount ? formatKRW(Number(position.investmentAmount)) : "-"],
+                      ["발행일", formatDate(position.issueDate)],
+                      ["만기일", formatDate(position.maturityDate)],
+                      ["표면금리", position.couponRate !== null ? formatPercent(position.couponRate) : "-"],
+                      ["만기이자율(YTM)", position.ytm !== null ? formatPercent(position.ytm) : "-"],
+                    ] as Array<[string, string | null]>,
+                  },
+                  {
+                    heading: "전환관련 사항",
+                    rows: [
+                      ["최초 전환가", position.initialConversionPrice ? formatKRW(position.initialConversionPrice) : "-"],
+                      ["최저 전환가", position.minConversionPrice ? formatKRW(position.minConversionPrice) : "-"],
+                      ["현재 전환가", position.currentConversionPrice ? formatKRW(position.currentConversionPrice) : "-"],
+                      ["전환 가능 기간", position.conversionStartDate ? `${formatDate(position.conversionStartDate)} ~ ${formatDate(position.conversionEndDate)}` : "-"],
+                    ] as Array<[string, string | null]>,
+                  },
+                  {
+                    heading: "Put Option",
+                    rows: [
+                      ["풋옵션 수익률", position.putOptionRate !== null ? formatPercent(position.putOptionRate) : "-"],
+                      ["풋옵션 행사 가능기간", position.putOptionStartDate ? `${formatDate(position.putOptionStartDate)} ~ ${formatDate(position.putOptionEndDate)}` : "-"],
+                      ["다음 행사가능 기간", nextExerciseWindow(position.putOptionStartDate, position.putOptionEndDate)],
+                    ] as Array<[string, string | null]>,
+                  },
+                  {
+                    heading: "Call Option",
+                    rows: [
+                      ["콜옵션 금리", position.callOptionRate !== null ? formatPercent(position.callOptionRate) : "-"],
+                      ["콜옵션 비율", position.callOptionRatio !== null ? formatPercent(position.callOptionRatio) : "-"],
+                      ["콜옵션 행사 가능기간", position.callOptionStartDate ? `${formatDate(position.callOptionStartDate)} ~ ${formatDate(position.callOptionEndDate)}` : "-"],
+                    ] as Array<[string, string | null]>,
+                  },
+                ].map((section) => (
+                  <section key={section.heading}>
+                    <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                      {section.heading}
+                    </h4>
+                    <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
+                      {section.rows.map(([label, value]) => (
+                        <div key={label}>
+                          <dt className="text-gray-500 text-xs">{label}</dt>
+                          <dd className="text-gray-900 font-medium mt-0.5">{value || "-"}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </section>
+                ))}
                 {position.sourceDisclosureUrl && (
                   <div className="mt-4 pt-4 border-t border-gray-100">
                     <a
