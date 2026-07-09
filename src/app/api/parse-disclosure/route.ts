@@ -433,12 +433,14 @@ export async function POST(req: NextRequest) {
       "putOptionStartDate",
       "putOptionEndDate",
       "putOptionRate",
+      "putOptionSchedule",
       "callOptionStartDate",
       "callOptionEndDate",
       "callOptionRatio",
       "callOptionRate",
     ];
-    const missingPutCall = putCallKeys.filter((k) => unfilled.includes(k));
+    // schedule은 unfilled로 안 뜨는 계산 필드지만, 풋옵션 필드가 하나라도 비어있으면 스크래핑 트리거
+    const missingPutCall = putCallKeys.filter((k) => k !== "putOptionSchedule" && unfilled.includes(k));
     let scrapeStatus: string | undefined;
     let extracted: PutCallExtraction | undefined;
 
@@ -448,8 +450,10 @@ export async function POST(req: NextRequest) {
         extracted = extractPutCall(bodyText);
         const merged: string[] = [];
         for (const k of putCallKeys) {
-          if (extracted[k] !== undefined && !filled.includes(k)) {
-            (data as Record<string, unknown>)[k] = extracted[k];
+          if (extracted[k] === undefined) continue;
+          (data as Record<string, unknown>)[k] = extracted[k];
+          // schedule은 계산용 내부 필드라 사용자 노출 목록에는 넣지 않음
+          if (k !== "putOptionSchedule" && !filled.includes(k)) {
             filled.push(k);
             merged.push(k);
           }
