@@ -290,17 +290,20 @@ function mapDecisionToSchema(
   // CB 실측 키: cv_prc / cvrqpd_bgd / cvrqpd_edd / act_mktprcfl_cvprc_lwtrsprc
   // EB 는 ex_* / exrqpd_* / act_mktprcfl_exprc_lwtrsprc 로 대칭 명명될 가능성이 높음
   // BW 는 신주인수권 관련 필드 (ss_* 계열)
-  set("initialConversionPrice", toNumber(get("cv_prc", "ex_prc", "ss_prc")));
-  set(
-    "minConversionPrice",
-    toNumber(
-      get(
-        "act_mktprcfl_cvprc_lwtrsprc",
-        "act_mktprcfl_exprc_lwtrsprc",
-        "act_mktprcfl_ssprc_lwtrsprc",
-      ),
+  const initialPrice = toNumber(get("cv_prc", "ex_prc", "ss_prc"));
+  set("initialConversionPrice", initialPrice);
+
+  // EB(교환사채)는 리픽싱이 없어서 정형 API에 최저 전환가액이 없음.
+  // 실무상 최초 교환가액 = 최저 교환가액이므로 initial을 그대로 사용.
+  const rawMin = toNumber(
+    get(
+      "act_mktprcfl_cvprc_lwtrsprc",
+      "act_mktprcfl_exprc_lwtrsprc",
+      "act_mktprcfl_ssprc_lwtrsprc",
     ),
   );
+  const effectiveMin = rawMin ?? (type === "EB" ? initialPrice : undefined);
+  set("minConversionPrice", effectiveMin);
   set(
     "conversionStartDate",
     toDate(
@@ -440,26 +443,41 @@ export async function POST(req: NextRequest) {
     let claudeStatus: string | undefined;
     let bodyExcerpt: string | undefined;
 
+    let claudeExtracted: PutCallExtraction | undefined;
     if (missingPutCall.length > 0 && process.env.ANTHROPIC_API_KEY) {
+      // 1) 스크래핑
+      let bodyText: string;
       try {
-        const bodyText = await fetchDisclosureBodyText(rcpNo);
+        bodyText = await fetchDisclosureBodyText(rcpNo);
         bodyExcerpt = bodyText.slice(0, 2000);
-        const extracted = await extractPutCallWithClaude(bodyText);
-
-        for (const k of putCallKeys) {
-          if (extracted[k] !== undefined && !filled.includes(k)) {
-            (data as Record<string, unknown>)[k] = extracted[k];
-            filled.push(k);
-          }
-        }
-        // unfilled 목록에서 이번에 채워진 필드 제거
-        const filledSet = new Set(filled);
-        for (let i = unfilled.length - 1; i >= 0; i--) {
-          if (filledSet.has(unfilled[i])) unfilled.splice(i, 1);
-        }
-        claudeStatus = `OK (${Object.keys(extracted).length}개 추출)`;
       } catch (err) {
-        claudeStatus = `실패: ${(err instanceof Error ? err.message : String(err)).slice(0, 150)}`;
+        claudeStatus = `스크래핑 실패: ${(err instanceof Error ? err.message : String(err)).slice(0, 200)}`;
+        bodyText = "";
+      }
+
+      // 2) Claude 추출
+      if (bodyText) {
+        try {
+          claudeExtracted = await extractPutCallWithClaude(bodyText);
+          const extractedKeys = Object.keys(claudeExtracted);
+          const merged: string[] = [];
+          for (const k of putCallKeys) {
+            if (claudeExtracted[k] !== undefined && !filled.includes(k)) {
+              (data as Record<string, unknown>)[k] = claudeExtracted[k];
+              filled.push(k);
+              merged.push(k);
+            }
+          }
+          const filledSet = new Set(filled);
+          for (let i = unfilled.length - 1; i >= 0; i--) {
+            if (filledSet.has(unfilled[i])) unfilled.splice(i, 1);
+          }
+          claudeStatus =
+            `본문 ${bodyText.length}자 스크래핑 → Claude 반환 ${extractedKeys.length}개 (${extractedKeys.join(",") || "없음"}) → 병합 ${merged.length}개`;
+        } catch (err) {
+          claudeStatus =
+            `본문 ${bodyText.length}자 스크래핑 → Claude 실패: ${(err instanceof Error ? err.message : String(err)).slice(0, 200)}`;
+        }
       }
     } else if (missingPutCall.length > 0 && !process.env.ANTHROPIC_API_KEY) {
       claudeStatus = "ANTHROPIC_API_KEY 미설정 (수동 입력 필요)";
@@ -472,6 +490,7 @@ export async function POST(req: NextRequest) {
       _meta: meta,
       _rawDecision: row,
       _claudeStatus: claudeStatus,
+      _claudeExtracted: claudeExtracted,
       _bodyExcerpt: bodyExcerpt,
     });
   } catch (err) {

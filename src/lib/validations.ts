@@ -23,6 +23,23 @@ export const loginSchema = z.object({
   password: z.string().min(1, "비밀번호를 입력해주세요."),
 });
 
+/**
+ * react-hook-form이 `valueAsNumber: true` 로 등록된 빈 input을 `NaN` 으로 넘기는데,
+ * Zod의 `z.number()` 는 NaN 을 거부해서 optional이어도 저장이 막힌다.
+ * NaN / "" / null / undefined 를 모두 undefined 로 정규화한 뒤 검증.
+ */
+const optionalNumber = (rule?: (n: z.ZodNumber) => z.ZodNumber) => {
+  const base = z.number();
+  return z.preprocess(
+    (v: unknown) => {
+      if (v === "" || v === null || v === undefined) return undefined;
+      if (typeof v === "number" && Number.isNaN(v)) return undefined;
+      return v;
+    },
+    (rule ? rule(base) : base).optional(),
+  );
+};
+
 export const positionSchema = z.object({
   bondCode: z.string().optional(),
   assetName: z.string().min(1, "메자닌 자산명을 입력해주세요."),
@@ -35,24 +52,24 @@ export const positionSchema = z.object({
   mezzanineType: z.enum(["CB", "BW", "EB", "RCPS"]),
   issueDate: z.string().optional(),
   investmentType: z.enum(["DIRECT", "INDIRECT"]),
-  investmentAmount: z.number().positive("투자금액은 0보다 커야 합니다.").optional(),
-  issueAmount: z.number().positive("발행총액은 0보다 커야 합니다.").optional(),
+  investmentAmount: optionalNumber((n) => n.positive("투자금액은 0보다 커야 합니다.")),
+  issueAmount: optionalNumber((n) => n.positive("발행총액은 0보다 커야 합니다.")),
   maturityDate: z.string().optional(),
-  couponRate: z.number().min(0).max(100).optional(),
-  ytm: z.number().min(0).max(100).optional(),
-  initialConversionPrice: z.number().positive().optional(),
-  minConversionPrice: z.number().positive().optional(),
-  currentConversionPrice: z.number().positive().optional(),
+  couponRate: optionalNumber((n) => n.min(0).max(100)),
+  ytm: optionalNumber((n) => n.min(0).max(100)),
+  initialConversionPrice: optionalNumber((n) => n.positive()),
+  minConversionPrice: optionalNumber((n) => n.positive()),
+  currentConversionPrice: optionalNumber((n) => n.positive()),
   conversionStartDate: z.string().optional(),
   conversionEndDate: z.string().optional(),
-  putOptionRate: z.number().min(0).max(100).optional(),
+  putOptionRate: optionalNumber((n) => n.min(0).max(100)),
   putOptionStartDate: z.string().optional(),
   putOptionEndDate: z.string().optional(),
-  callOptionRatio: z.number().min(0).max(100).optional(),
+  callOptionRatio: optionalNumber((n) => n.min(0).max(100)),
   callOptionStartDate: z.string().optional(),
   callOptionEndDate: z.string().optional(),
-  callOptionRate: z.number().min(0).max(100).optional(),
-  seriesNumber: z.number().int().positive().optional(),
+  callOptionRate: optionalNumber((n) => n.min(0).max(100)),
+  seriesNumber: optionalNumber((n) => n.int().positive()),
   sourceDisclosureUrl: z.string().url().optional().or(z.literal("")),
   note: z.string().optional(),
 });
