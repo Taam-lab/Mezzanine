@@ -27,7 +27,7 @@ interface CheckErrorMessage {
 interface CheckResponse {
   success?: boolean;
   results?: Array<Record<string, unknown>>;
-  message?: CheckErrorMessage;
+  message?: CheckErrorMessage | string;
 }
 
 export interface Quote {
@@ -86,9 +86,15 @@ export async function fetchQuote(ticker: string): Promise<Quote> {
   }
 
   if (data.success === false) {
-    const err = data.message?.errmsg ?? "unknown";
-    const desc = data.message?.desc ?? "";
-    throw new Error(`CHECK 응답 실패: ${err}${desc ? ` (${desc})` : ""}`);
+    // message가 객체일 수도, 문자열일 수도 있음 → 원문 응답을 그대로 노출
+    const msgObj = data.message;
+    const msgStr =
+      typeof msgObj === "string"
+        ? msgObj
+        : msgObj?.errmsg
+          ? `${msgObj.errmsg}${msgObj.desc ? ` (${msgObj.desc})` : ""}`
+          : rawText.slice(0, 300);
+    throw new Error(`CHECK 응답 실패: ${msgStr}`);
   }
 
   // results 필드명이 다를 수 있으니 후보 몇 개 시도
