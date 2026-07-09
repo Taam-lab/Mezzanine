@@ -1,14 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { fetchNaverQuote, type NaverQuote } from "@/lib/naverPrice";
+import { fetchQuote, type Quote } from "@/lib/checkPrice";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 /**
  * GET /api/prices?tickers=A,B,C
- * 네이버 실시간 시세를 병렬로 조회해 반환.
- * 조회에 성공한 종목의 스냅샷도 DB에 저장.
+ * CHECK API로 실시간 시세를 병렬 조회. 성공한 종목은 스냅샷 저장.
  */
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -29,12 +28,12 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "한 번에 최대 100개까지 조회 가능합니다." }, { status: 400 });
   }
 
-  // 네이버는 병렬 요청에 관대하지만, 안전하게 8개씩 배치로 나눠 던짐
+  // 8개씩 청크로 병렬 조회 (외부 API rate limit 대비)
   const CHUNK = 8;
-  const results: Array<NaverQuote | { ticker: string; error: string }> = [];
+  const results: Array<Quote | { ticker: string; error: string }> = [];
   for (let i = 0; i < tickers.length; i += CHUNK) {
     const chunk = tickers.slice(i, i + CHUNK);
-    const settled = await Promise.allSettled(chunk.map((t) => fetchNaverQuote(t)));
+    const settled = await Promise.allSettled(chunk.map((t) => fetchQuote(t)));
     settled.forEach((r, idx) => {
       const t = chunk[idx];
       if (r.status === "fulfilled") {
@@ -46,15 +45,15 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  // 성공한 종목에 대해 스냅샷 저장 (활성 포지션이 있는 것만)
-  const successful = results.filter((r): r is NaverQuote => "price" in r);
+  const successful = results.filter((r): r is Quote => "price" in r);
   if (successful.length > 0) {
     const tickerSet = successful.map((q) => q.ticker);
     const positions = await prisma.position.findMany({
       where: { underlyingTicker: { in: tickerSet }, isActive: true },
       select: { id: true, underlyingTicker: true },
     });
-    const byTicker = new Map<string, NaverQuote>(successful.map((q) => [q.ticker, q]));
+    const byTicker = new Map<string, Quote>(successful.map((q) => [q.ticker, q]));
+
     interface SnapshotRow {
       positionId: string;
       price: number;
@@ -72,8 +71,8 @@ export async function GET(req: NextRequest) {
         price: q.price,
         changeRate: q.changeRate,
         volume: q.volume !== undefined ? BigInt(Math.floor(q.volume)) : null,
-        marketCap: q.marketCap !== undefined ? BigInt(Math.floor(q.marketCap * 100_000_000)) : null,
-        source: "naver",
+        marketCap: q.marketCap !== undefined ? BigInt(Math.floor(q.marketCap)) : null,
+        source: "check",
       });
     }
     if (snapshots.length > 0) {
@@ -81,8 +80,7 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // 종목코드 → 결과 매핑으로 반환
-  const map: Record<string, NaverQuote | { error: string }> = {};
+  const map: Record<string, Quote | { error: string }> = {};
   for (const r of results) {
     if ("price" in r) {
       map[r.ticker] = r;

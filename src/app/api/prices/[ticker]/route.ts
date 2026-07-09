@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { fetchNaverQuote } from "@/lib/naverPrice";
+import { fetchQuote } from "@/lib/checkPrice";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -18,7 +18,7 @@ export async function GET(
   }
 
   try {
-    const quote = await fetchNaverQuote(ticker);
+    const quote = await fetchQuote(ticker);
 
     const positions = await prisma.position.findMany({
       where: { underlyingTicker: ticker, isActive: true },
@@ -26,18 +26,17 @@ export async function GET(
     });
 
     if (positions.length > 0) {
-      const marketCapWon =
-        quote.marketCap !== undefined ? BigInt(Math.floor(quote.marketCap * 100_000_000)) : null;
-      const volumeBig = quote.volume !== undefined ? BigInt(Math.floor(quote.volume)) : null;
+      const marketCap = quote.marketCap !== undefined ? BigInt(Math.floor(quote.marketCap)) : null;
+      const volume = quote.volume !== undefined ? BigInt(Math.floor(quote.volume)) : null;
 
       await prisma.priceSnapshot.createMany({
         data: positions.map((p: { id: string }) => ({
           positionId: p.id,
           price: quote.price,
           changeRate: quote.changeRate,
-          volume: volumeBig,
-          marketCap: marketCapWon,
-          source: "naver",
+          volume,
+          marketCap,
+          source: "check",
         })),
       });
     }
@@ -47,7 +46,7 @@ export async function GET(
     console.error("[prices]", err);
     const detail = err instanceof Error ? err.message : String(err);
     return NextResponse.json(
-      { error: `네이버 시세 조회 실패: ${detail.slice(0, 200)}` },
+      { error: `CHECK 시세 조회 실패: ${detail.slice(0, 200)}` },
       { status: 502 },
     );
   }

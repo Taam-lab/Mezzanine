@@ -230,7 +230,7 @@ export default function PositionDetailPage() {
                     onClick={() => refreshPrice(ticker)}
                     disabled={refreshingPrice}
                     className="text-[10px] text-gray-400 hover:text-gray-700 disabled:opacity-50"
-                    title="네이버 실시간 시세 새로고침"
+                    title="실시간 시세 새로고침"
                   >
                     {refreshingPrice ? "..." : "↻"}
                   </button>
@@ -241,7 +241,7 @@ export default function PositionDetailPage() {
               </p>
               {livePrice?.tradedAt && (
                 <p className="text-[10px] text-gray-400 mt-0.5">
-                  네이버 {livePrice.tradedAt.slice(11, 16)}
+                  CHECK {livePrice.tradedAt.slice(11, 16)}
                 </p>
               )}
             </CardContent>
