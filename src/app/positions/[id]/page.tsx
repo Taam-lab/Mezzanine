@@ -105,6 +105,7 @@ export default function PositionDetailPage() {
   const [position, setPosition] = useState<PositionDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [livePrice, setLivePrice] = useState<LivePrice | null>(null);
+  const [priceError, setPriceError] = useState<string | null>(null);
   const [refreshingPrice, setRefreshingPrice] = useState(false);
 
   const ticker = position?.underlyingTicker;
@@ -113,16 +114,19 @@ export default function PositionDetailPage() {
     setRefreshingPrice(true);
     try {
       const res = await fetch(`/api/prices/${t}`);
+      const data = await res.json();
       if (res.ok) {
-        const data = await res.json();
         setLivePrice({
           price: data.price,
           changeRate: data.changeRate,
           tradedAt: data.tradedAt,
         });
+        setPriceError(null);
+      } else {
+        setPriceError(data.error || `HTTP ${res.status}`);
       }
-    } catch {
-      // ignore — 기존 스냅샷으로 폴백
+    } catch (err) {
+      setPriceError(err instanceof Error ? err.message : "네트워크 오류");
     } finally {
       setRefreshingPrice(false);
     }
@@ -239,9 +243,14 @@ export default function PositionDetailPage() {
               <p className="text-xl font-bold tabular-nums text-gray-900">
                 {currentPrice ? formatKRW(currentPrice) : "-"}
               </p>
-              {livePrice?.tradedAt && (
+              {livePrice?.tradedAt && !priceError && (
                 <p className="text-[10px] text-gray-400 mt-0.5">
                   CHECK {livePrice.tradedAt.slice(11, 16)}
+                </p>
+              )}
+              {priceError && (
+                <p className="text-[10px] text-red-500 mt-0.5" title={priceError}>
+                  실시간 조회 실패
                 </p>
               )}
             </CardContent>
