@@ -99,8 +99,11 @@ function decodeHtmlEntities(s: string): string {
 }
 
 /**
- * "2026.08.19 15:23" → ISO
- * "Wed, 19 Aug 2026 15:23:00 GMT" → ISO
+ * "2026.08.19 15:23" → ISO (KST 로 저장된 원본 그대로)
+ * "Wed, 19 Aug 2026 15:23:00 GMT" → ISO (UTC → KST 로 변환)
+ *
+ * Google News pubDate가 GMT 로 오면 UTC 그대로 sort/display 하면 9시간 차이가 나서
+ * 뉴스 시간이 이상하게 보인다. UTC epoch로 파싱 후 +9h shift 해서 KST 문자열 반환.
  */
 function toIsoLoose(display: string): string {
   const kr = display.match(/(\d{4})[.\-/](\d{1,2})[.\-/](\d{1,2})(?:\s+(\d{1,2}):(\d{2}))?/);
@@ -109,15 +112,17 @@ function toIsoLoose(display: string): string {
     const pad = (v: string) => v.padStart(2, "0");
     return `${y}-${pad(mo)}-${pad(d)}${h ? `T${pad(h)}:${mi}` : ""}`;
   }
-  // RFC 2822 (Google News pubDate) 시도
   const t = Date.parse(display);
   if (!Number.isNaN(t)) {
-    const d = new Date(t);
-    return d.toISOString().slice(0, 16); // YYYY-MM-DDTHH:mm
+    const kst = new Date(t + 9 * 3600_000);
+    return kst.toISOString().slice(0, 16); // YYYY-MM-DDTHH:mm (KST wall clock)
   }
   return display;
 }
 
+/** ISO 문자열이 오늘/어제인지에 따라 "N분 전" / "N시간 전" / "M/D HH:mm" 로 표시.
+ * KST 기준으로 계산 (isoDate는 KST wall-clock 저장).
+ */
 function formatDisplayFromIso(iso: string): string {
   const m = iso.match(/(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?/);
   if (!m) return iso;

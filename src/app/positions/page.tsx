@@ -35,14 +35,14 @@ interface Position {
 }
 
 /**
- * 조기상환청구권 다음 행사가능 회차를 짧게 표기 ("YYYY-MM-DD ~ YYYY-MM-DD").
- * 목록 셀 안이라 문장이 아니라 날짜 범위만 반환.
+ * 조기상환청구권 다음 행사가능 회차 표기.
+ * 오늘 날짜가 회차 [from, to] 범위 안에 있으면 exercisable=true → 셀 색상을 빨간색으로.
  */
 function nextPutWindow(
   scheduleJson: string | null,
   startIso: string | null,
   endIso: string | null,
-): string {
+): { text: string; exercisable: boolean } {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const fmt = (iso: string) => iso.slice(0, 10);
@@ -52,23 +52,24 @@ function nextPutWindow(
       const rows = JSON.parse(scheduleJson) as Array<{ from: string; to: string }>;
       if (Array.isArray(rows) && rows.length > 0) {
         for (const row of rows) {
-          if (today > new Date(row.to)) continue;
-          return `${fmt(row.from)} ~ ${fmt(row.to)}`;
+          const from = new Date(row.from);
+          const to = new Date(row.to);
+          if (today > to) continue;
+          const exercisable = today >= from && today <= to;
+          return { text: `${fmt(row.from)} ~ ${fmt(row.to)}`, exercisable };
         }
-        return "종료";
+        return { text: "종료", exercisable: false };
       }
     } catch {
       // fall through
     }
   }
-  if (!startIso || !endIso) return "-";
+  if (!startIso || !endIso) return { text: "-", exercisable: false };
   const start = new Date(startIso);
   const end = new Date(endIso);
-  // 시작일이 미래면 다음 회차는 그 범위 그대로.
-  // (schedule 없이 저장된 이전 데이터에서 end가 오염돼 있어도 start 기준으로 판단)
-  if (today < start) return `${fmt(startIso)} ~ ${fmt(endIso)}`;
-  if (today <= end) return `현재 ~ ${fmt(endIso)}`;
-  return "종료";
+  if (today < start) return { text: `${fmt(startIso)} ~ ${fmt(endIso)}`, exercisable: false };
+  if (today <= end) return { text: `현재 ~ ${fmt(endIso)}`, exercisable: true };
+  return { text: "종료", exercisable: false };
 }
 
 interface LiveQuote {
@@ -359,9 +360,24 @@ export default function PositionsPage() {
                         <td className="px-4 py-3 text-center text-sm text-gray-600">
                           {formatDate(pos.issueDate)}
                         </td>
-                        <td className="px-4 py-3 text-center tabular-nums text-xs text-gray-600 whitespace-nowrap">
-                          {nextPutWindow(pos.putOptionSchedule, pos.putOptionStartDate, pos.putOptionEndDate)}
-                        </td>
+                        {(() => {
+                          const put = nextPutWindow(
+                            pos.putOptionSchedule,
+                            pos.putOptionStartDate,
+                            pos.putOptionEndDate,
+                          );
+                          return (
+                            <td
+                              className={`px-4 py-3 text-center tabular-nums text-xs whitespace-nowrap ${
+                                put.exercisable
+                                  ? "text-red-600 font-semibold"
+                                  : "text-gray-600"
+                              }`}
+                            >
+                              {put.text}
+                            </td>
+                          );
+                        })()}
                         <td className="px-4 py-3 text-center text-sm text-gray-600">
                           {formatDate(pos.maturityDate)}
                         </td>
