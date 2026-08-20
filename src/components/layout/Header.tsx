@@ -1,11 +1,15 @@
 "use client";
 
-import { Bell, ChevronDown, LogOut, User } from "lucide-react";
+import { Bell, ChevronDown, LogOut, User, Menu } from "lucide-react";
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
-export function Header() {
+interface Props {
+  onMenuToggle?: () => void;
+}
+
+export function Header({ onMenuToggle }: Props = {}) {
   const router = useRouter();
   const [unreadCount, setUnreadCount] = useState(0);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -23,8 +27,20 @@ export function Header() {
   }
 
   return (
-    <header className="fixed top-0 left-60 right-0 h-14 bg-white border-b border-gray-200 flex items-center px-6 gap-4 z-20">
-      <div className="flex-1 max-w-md">
+    <header className="fixed top-0 left-0 md:left-60 right-0 h-14 bg-white border-b border-gray-200 flex items-center px-3 md:px-6 gap-2 md:gap-4 z-20">
+      {/* 모바일 햄버거 */}
+      {onMenuToggle && (
+        <button
+          onClick={onMenuToggle}
+          className="md:hidden p-2 rounded-lg hover:bg-gray-100 -ml-1"
+          aria-label="메뉴 열기"
+        >
+          <Menu className="h-5 w-5 text-gray-700" />
+        </button>
+      )}
+
+      {/* 검색: 모바일에선 숨김 (햄버거+알림+프로필로 폭 확보) */}
+      <div className="hidden md:block flex-1 max-w-md">
         <input
           type="text"
           placeholder="종목명, 종목코드 검색..."
@@ -32,7 +48,7 @@ export function Header() {
         />
       </div>
 
-      <div className="flex items-center gap-3 ml-auto">
+      <div className="flex items-center gap-1 md:gap-3 ml-auto">
         <Link href="/alerts" className="relative p-2 rounded-lg hover:bg-gray-100 transition-colors">
           <Bell className="h-5 w-5 text-gray-600" />
           {unreadCount > 0 && (
@@ -45,13 +61,13 @@ export function Header() {
         <div className="relative">
           <button
             onClick={() => setUserMenuOpen(!userMenuOpen)}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-gray-100 transition-colors"
+            className="flex items-center gap-2 px-2 md:px-3 py-1.5 rounded-lg hover:bg-gray-100 transition-colors"
           >
             <div className="w-7 h-7 rounded-full bg-[#0A2A5E] flex items-center justify-center">
               <User className="h-4 w-4 text-white" />
             </div>
-            <span className="text-sm font-medium text-gray-700">관리자</span>
-            <ChevronDown className="h-4 w-4 text-gray-400" />
+            <span className="hidden sm:inline text-sm font-medium text-gray-700">관리자</span>
+            <ChevronDown className="hidden sm:inline h-4 w-4 text-gray-400" />
           </button>
 
           {userMenuOpen && (
