@@ -17,23 +17,19 @@ import {
   ExternalLink,
 } from "lucide-react";
 import Link from "next/link";
-import { formatKRW, formatPercent, formatDateTime, SEVERITY_LABEL } from "@/lib/utils";
+import { formatPercent, formatDateTime, SEVERITY_LABEL } from "@/lib/utils";
 
 interface DashboardStats {
   totalPositions: number;
-  criticalAlerts: number;
-  warningAlerts: number;
-  infoAlerts: number;
-  unreadAlerts: number;
-  recentAlerts: AlertItem[];
   topMovers: Mover[];
 }
 
-interface AlertItem {
+interface DbAlertItem {
   id: string;
   title: string;
   severity: string;
   createdAt: string;
+  sourceUrl?: string;
   position?: { assetName: string };
 }
 
@@ -41,6 +37,7 @@ interface Mover {
   id: string;
   assetName: string;
   underlyingCompanyName: string;
+  underlyingTicker: string;
   changeRate: number | null;
   currentPrice: number | null;
   currentConversionPrice: number | null;
@@ -50,116 +47,171 @@ interface FeedItem {
   title: string;
   url: string;
   date: string;
+  isoDate: string;
   source?: string;
-}
-
-interface TickerFeed {
   ticker: string;
   companyName: string;
-  news: FeedItem[];
-  disclosures: FeedItem[];
+}
+
+interface UiAlert {
+  severity: "CRITICAL" | "WARNING" | "INFO";
+  title: string;
+  url?: string;
+  date: string; // 표시용
+  isoDate: string; // 정렬용
+  kind: "disclosure" | "price" | "db";
+  ticker?: string;
+}
+
+interface PositionSlim {
+  id: string;
+  assetName: string;
+  underlyingTicker: string;
+  underlyingCompanyName: string;
+  currentConversionPrice: number | null;
+  isActive: boolean;
 }
 
 export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  const [feeds, setFeeds] = useState<TickerFeed[]>([]);
+  const [news, setNews] = useState<FeedItem[]>([]);
+  const [disclosures, setDisclosures] = useState<FeedItem[]>([]);
   const [feedsLoading, setFeedsLoading] = useState(false);
+  const [alertList, setAlertList] = useState<UiAlert[]>([]);
 
   async function loadDashboard() {
     setLoading(true);
     try {
-      const [posRes, alertRes] = await Promise.all([
-        fetch("/api/positions"),
-        fetch("/api/alerts?limit=10"),
+      const posRes = await fetch("/api/positions");
+      const positions = (await posRes.json()) as PositionSlim[];
+
+      // 활성 종목 티커별 실시간 시세 (병렬)
+      const tickerNameMap = new Map<string, string>();
+      for (const p of positions) {
+        if (!p.isActive || !/^\d{6}$/.test(p.underlyingTicker)) continue;
+        if (!tickerNameMap.has(p.underlyingTicker)) {
+          tickerNameMap.set(p.underlyingTicker, p.underlyingCompanyName);
+        }
+      }
+      const tickers = Array.from(tickerNameMap.keys());
+      const tickerNameEntries = Array.from(tickerNameMap.entries())
+        .map(([t, n]) => `${t}:${encodeURIComponent(n)}`)
+        .join(",");
+
+      const [priceRes, dbAlertRes, feedRes] = await Promise.all([
+        tickers.length
+          ? fetch(`/api/prices?tickers=${tickers.join(",")}`).then((r) => r.json())
+          : Promise.resolve({ quotes: {} }),
+        fetch("/api/alerts?limit=20").then((r) => r.json()),
+        tickers.length
+          ? fetch(`/api/dashboard/feed?tickers=${tickerNameEntries}`).then((r) => r.json())
+          : Promise.resolve({ news: [], disclosures: [], alerts: [] }),
       ]);
-      const positions = await posRes.json();
-      const alerts = await alertRes.json();
 
-      const criticalAlerts = alerts.filter((a: AlertItem) => a.severity === "CRITICAL").length;
-      const warningAlerts = alerts.filter((a: AlertItem) => a.severity === "WARNING").length;
-      const infoAlerts = alerts.filter((a: AlertItem) => a.severity === "INFO").length;
+      const quotes = (priceRes as { quotes: Record<string, { price?: number; changeRate?: number }> })
+        .quotes ?? {};
 
-      const unreadRes = await fetch("/api/alerts?unreadOnly=true&countOnly=true");
-      const { count } = await unreadRes.json();
-
+      // Movers: 활성 종목 + 방금 조회한 시세로 절대 등락률 기준 정렬
       const movers: Mover[] = positions
-        .map((p: {
-          id: string;
-          assetName: string;
-          underlyingCompanyName: string;
-          currentConversionPrice: number | null;
-          priceSnapshots?: Array<{ price: number; changeRate: number }>;
-        }) => ({
-          id: p.id,
-          assetName: p.assetName,
-          underlyingCompanyName: p.underlyingCompanyName,
-          changeRate: p.priceSnapshots?.[0]?.changeRate ?? null,
-          currentPrice: p.priceSnapshots?.[0]?.price ?? null,
-          currentConversionPrice: p.currentConversionPrice,
-        }))
-        .sort((a: Mover, b: Mover) => Math.abs(b.changeRate ?? 0) - Math.abs(a.changeRate ?? 0))
+        .filter((p) => p.isActive)
+        .map((p) => {
+          const q = quotes[p.underlyingTicker];
+          return {
+            id: p.id,
+            assetName: p.assetName,
+            underlyingCompanyName: p.underlyingCompanyName,
+            underlyingTicker: p.underlyingTicker,
+            changeRate: q?.changeRate ?? null,
+            currentPrice: q?.price ?? null,
+            currentConversionPrice: p.currentConversionPrice,
+          };
+        })
+        .sort((a, b) => Math.abs(b.changeRate ?? 0) - Math.abs(a.changeRate ?? 0))
         .slice(0, 5);
+
+      // 가격 기반 알림 계산: ±10% CRITICAL, ±5% WARNING (활성 종목 전체 대상)
+      const priceAlerts: UiAlert[] = [];
+      const nowIso = new Date().toISOString();
+      for (const p of positions) {
+        if (!p.isActive) continue;
+        const q = quotes[p.underlyingTicker];
+        const rate = q?.changeRate;
+        if (rate === undefined || rate === null || !Number.isFinite(rate)) continue;
+        const abs = Math.abs(rate);
+        if (abs >= 10) {
+          priceAlerts.push({
+            severity: "CRITICAL",
+            title: `[${p.underlyingCompanyName}] 주가 ${rate >= 0 ? "+" : ""}${rate.toFixed(2)}% ${rate >= 0 ? "급등" : "급락"}`,
+            date: formatDateTime(new Date()),
+            isoDate: nowIso,
+            kind: "price",
+            ticker: p.underlyingTicker,
+            url: `/positions/${p.id}`,
+          });
+        } else if (abs >= 5) {
+          priceAlerts.push({
+            severity: rate >= 0 ? "WARNING" : "WARNING",
+            title: `[${p.underlyingCompanyName}] 주가 ${rate >= 0 ? "+" : ""}${rate.toFixed(2)}%`,
+            date: formatDateTime(new Date()),
+            isoDate: nowIso,
+            kind: "price",
+            ticker: p.underlyingTicker,
+            url: `/positions/${p.id}`,
+          });
+        }
+      }
+
+      // 공시 기반 알림 (feed API에서 계산됨)
+      const feedData = feedRes as {
+        news: FeedItem[];
+        disclosures: FeedItem[];
+        alerts: Array<{ severity: "CRITICAL" | "WARNING" | "INFO"; title: string; url?: string; date: string; isoDate: string; ticker: string }>;
+      };
+      const disclosureAlerts: UiAlert[] = (feedData.alerts ?? []).map((a) => ({
+        severity: a.severity,
+        title: a.title,
+        url: a.url,
+        date: a.date,
+        isoDate: a.isoDate,
+        kind: "disclosure",
+        ticker: a.ticker,
+      }));
+
+      // DB 알림 (Alert 테이블에 저장된 것 — 스케줄러가 있으면 채워짐)
+      const dbAlerts: UiAlert[] = (dbAlertRes as DbAlertItem[]).map((a) => ({
+        severity: (["CRITICAL", "WARNING", "INFO"].includes(a.severity)
+          ? a.severity
+          : "INFO") as "CRITICAL" | "WARNING" | "INFO",
+        title: a.title,
+        url: a.sourceUrl,
+        date: formatDateTime(a.createdAt),
+        isoDate: a.createdAt,
+        kind: "db",
+      }));
+
+      const merged = [...priceAlerts, ...disclosureAlerts, ...dbAlerts].sort((a, b) =>
+        a.isoDate < b.isoDate ? 1 : a.isoDate > b.isoDate ? -1 : 0,
+      );
+
+      setNews(feedData.news ?? []);
+      setDisclosures(feedData.disclosures ?? []);
+      setAlertList(merged);
+      setFeedsLoading(false);
 
       setStats({
         totalPositions: positions.length,
-        criticalAlerts,
-        warningAlerts,
-        infoAlerts,
-        unreadAlerts: count,
-        recentAlerts: alerts.slice(0, 8),
         topMovers: movers,
       });
       setLastUpdated(new Date());
-
-      // 뉴스/공시 팔로업: 활성 종목 티커별 병렬 스크래핑 (백그라운드로 병렬)
-      loadFeeds(
-        positions as Array<{
-          underlyingTicker: string;
-          underlyingCompanyName: string;
-          isActive: boolean;
-        }>,
-      );
     } finally {
       setLoading(false);
     }
   }
 
-  async function loadFeeds(
-    positions: Array<{ underlyingTicker: string; underlyingCompanyName: string; isActive: boolean }>,
-  ) {
-    // 기초자산 티커 unique 목록 (활성만) + 종목명 매핑
-    const nameByTicker = new Map<string, string>();
-    for (const p of positions) {
-      if (!p.isActive || !/^\d{6}$/.test(p.underlyingTicker)) continue;
-      if (!nameByTicker.has(p.underlyingTicker)) {
-        nameByTicker.set(p.underlyingTicker, p.underlyingCompanyName);
-      }
-    }
-    const tickers = Array.from(nameByTicker.keys());
-    if (tickers.length === 0) {
-      setFeeds([]);
-      return;
-    }
-    setFeedsLoading(true);
-    try {
-      const res = await fetch(`/api/dashboard/feed?tickers=${tickers.join(",")}`);
-      if (!res.ok) return;
-      const { feeds: raw } = (await res.json()) as {
-        feeds: Array<{ ticker: string; news: FeedItem[]; disclosures: FeedItem[] }>;
-      };
-      const enriched = raw.map((f) => ({
-        ...f,
-        companyName: nameByTicker.get(f.ticker) ?? f.ticker,
-      }));
-      setFeeds(enriched);
-    } finally {
-      setFeedsLoading(false);
-    }
-  }
-
   useEffect(() => {
+    setFeedsLoading(true);
     loadDashboard();
   }, []);
 
@@ -171,6 +223,11 @@ export default function DashboardPage() {
     };
     return map[severity] || "neutral";
   };
+
+  const critical = alertList.filter((a) => a.severity === "CRITICAL");
+  const warning = alertList.filter((a) => a.severity === "WARNING");
+  const info = alertList.filter((a) => a.severity === "INFO");
+  const recent = alertList.slice(0, 10);
 
   return (
     <AppLayout>
@@ -219,7 +276,7 @@ export default function DashboardPage() {
               <div>
                 <p className="text-xs text-gray-500">긴급 알림</p>
                 <p className="text-2xl font-bold text-red-600 tabular-nums">
-                  {stats?.criticalAlerts ?? "-"}
+                  {loading ? "-" : critical.length}
                 </p>
               </div>
             </CardContent>
@@ -233,7 +290,7 @@ export default function DashboardPage() {
               <div>
                 <p className="text-xs text-gray-500">중요 알림</p>
                 <p className="text-2xl font-bold text-yellow-600 tabular-nums">
-                  {stats?.warningAlerts ?? "-"}
+                  {loading ? "-" : warning.length}
                 </p>
               </div>
             </CardContent>
@@ -245,9 +302,9 @@ export default function DashboardPage() {
                 <Bell className="h-5 w-5 text-gray-600" />
               </div>
               <div>
-                <p className="text-xs text-gray-500">미확인 알림</p>
+                <p className="text-xs text-gray-500">일반 알림</p>
                 <p className="text-2xl font-bold text-gray-900 tabular-nums">
-                  {stats?.unreadAlerts ?? "-"}
+                  {loading ? "-" : info.length}
                 </p>
               </div>
             </CardContent>
@@ -255,31 +312,49 @@ export default function DashboardPage() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* 최근 알림 */}
+          {/* 최근 알림 (긴급 + 경고 + 정보 병합, 시간 desc) */}
           <Card>
             <CardHeader>
               <CardTitle>최근 알림</CardTitle>
-              <Link href="/alerts" className="text-xs text-[#0A2A5E] hover:underline">
-                전체보기
-              </Link>
+              <span className="text-xs text-gray-400">
+                주가 ±5% · 전일/당일 공시 · 실적/보고서
+              </span>
             </CardHeader>
-            <div className="divide-y divide-gray-50">
+            <div className="divide-y divide-gray-50 max-h-[420px] overflow-y-auto">
               {loading ? (
                 <div className="px-5 py-8 text-center text-sm text-gray-400">불러오는 중...</div>
-              ) : !stats?.recentAlerts.length ? (
+              ) : recent.length === 0 ? (
                 <div className="px-5 py-8 text-center text-sm text-gray-400">알림이 없습니다</div>
               ) : (
-                stats.recentAlerts.map((alert) => (
-                  <div key={alert.id} className="px-5 py-3 flex items-start gap-3">
-                    <Badge variant={severityBadge(alert.severity)} className="mt-0.5 flex-shrink-0">
-                      {SEVERITY_LABEL[alert.severity]}
-                    </Badge>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm text-gray-900 truncate">{alert.title}</p>
-                      <p className="text-xs text-gray-400 mt-0.5">{formatDateTime(alert.createdAt)}</p>
+                recent.map((alert, i) => {
+                  const content = (
+                    <div className="px-5 py-3 flex items-start gap-3 hover:bg-gray-50 transition-colors">
+                      <Badge
+                        variant={severityBadge(alert.severity)}
+                        className="mt-0.5 flex-shrink-0"
+                      >
+                        {SEVERITY_LABEL[alert.severity] ?? alert.severity}
+                      </Badge>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm text-gray-900 line-clamp-2">{alert.title}</p>
+                        <p className="text-xs text-gray-400 mt-0.5">{alert.date}</p>
+                      </div>
                     </div>
-                  </div>
-                ))
+                  );
+                  return alert.url ? (
+                    alert.url.startsWith("/") ? (
+                      <Link key={i} href={alert.url}>
+                        {content}
+                      </Link>
+                    ) : (
+                      <a key={i} href={alert.url} target="_blank" rel="noopener noreferrer">
+                        {content}
+                      </a>
+                    )
+                  ) : (
+                    <div key={i}>{content}</div>
+                  );
+                })
               )}
             </div>
           </Card>
@@ -331,7 +406,11 @@ export default function DashboardPage() {
                         >
                           {mover.changeRate !== null ? (
                             <>
-                              {isRise ? <TrendingUp className="inline h-3 w-3 mr-0.5" /> : isFall ? <TrendingDown className="inline h-3 w-3 mr-0.5" /> : null}
+                              {isRise ? (
+                                <TrendingUp className="inline h-3 w-3 mr-0.5" />
+                              ) : isFall ? (
+                                <TrendingDown className="inline h-3 w-3 mr-0.5" />
+                              ) : null}
                               {formatPercent(mover.changeRate)}
                             </>
                           ) : (
@@ -352,7 +431,7 @@ export default function DashboardPage() {
           </Card>
         </div>
 
-        {/* 기초자산별 뉴스/공시 팔로업 */}
+        {/* 기초자산 뉴스 (flat, 시간 desc) + 최근 공시 (flat, 시간 desc) */}
         {stats && stats.totalPositions > 0 && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <Card>
@@ -361,51 +440,39 @@ export default function DashboardPage() {
                   <Newspaper className="h-4 w-4 text-[#0A2A5E]" />
                   기초자산 뉴스
                 </CardTitle>
-                {feedsLoading && (
-                  <span className="text-xs text-gray-400">불러오는 중...</span>
-                )}
+                {feedsLoading && <span className="text-xs text-gray-400">불러오는 중...</span>}
               </CardHeader>
               <div className="divide-y divide-gray-50 max-h-[420px] overflow-y-auto">
-                {feeds.length === 0 && !feedsLoading ? (
-                  <div className="px-5 py-8 text-center text-sm text-gray-400">
-                    뉴스를 불러올 수 없습니다.
-                  </div>
-                ) : (
-                  feeds
-                    .filter((f) => f.news.length > 0)
-                    .map((f) => (
-                      <div key={`news-${f.ticker}`} className="px-5 py-3">
-                        <div className="flex items-center justify-between mb-2">
-                          <p className="text-xs font-semibold text-gray-700">
-                            {f.companyName}{" "}
-                            <span className="text-gray-400 font-normal">({f.ticker})</span>
-                          </p>
-                        </div>
-                        <ul className="space-y-1.5">
-                          {f.news.slice(0, 4).map((n, i) => (
-                            <li key={i} className="flex items-start gap-2 text-xs">
-                              <a
-                                href={n.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="flex-1 text-gray-700 hover:text-[#0A2A5E] hover:underline line-clamp-1"
-                              >
-                                {n.title}
-                              </a>
-                              <span className="text-gray-400 tabular-nums whitespace-nowrap">
-                                {n.date}
-                              </span>
-                              <ExternalLink className="h-3 w-3 text-gray-300 mt-0.5 flex-shrink-0" />
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    ))
-                )}
-                {feeds.length > 0 && feeds.every((f) => f.news.length === 0) && !feedsLoading && (
+                {news.length === 0 && !feedsLoading ? (
                   <div className="px-5 py-8 text-center text-sm text-gray-400">
                     최근 뉴스가 없습니다.
                   </div>
+                ) : (
+                  news.map((n, i) => (
+                    <a
+                      key={i}
+                      href={n.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block px-5 py-3 hover:bg-gray-50 transition-colors"
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-xs font-medium text-[#0A2A5E]">
+                          {n.companyName}
+                        </span>
+                        {n.source && (
+                          <span className="text-xs text-gray-400">· {n.source}</span>
+                        )}
+                        <span className="text-xs text-gray-400 tabular-nums ml-auto">
+                          {n.date}
+                        </span>
+                      </div>
+                      <p className="text-sm text-gray-800 line-clamp-2">
+                        {n.title}
+                        <ExternalLink className="inline h-3 w-3 text-gray-300 ml-1" />
+                      </p>
+                    </a>
+                  ))
                 )}
               </div>
             </Card>
@@ -416,54 +483,37 @@ export default function DashboardPage() {
                   <FileText className="h-4 w-4 text-[#0A2A5E]" />
                   기초자산 최근 공시
                 </CardTitle>
-                {feedsLoading && (
-                  <span className="text-xs text-gray-400">불러오는 중...</span>
-                )}
+                {feedsLoading && <span className="text-xs text-gray-400">불러오는 중...</span>}
               </CardHeader>
               <div className="divide-y divide-gray-50 max-h-[420px] overflow-y-auto">
-                {feeds.length === 0 && !feedsLoading ? (
+                {disclosures.length === 0 && !feedsLoading ? (
                   <div className="px-5 py-8 text-center text-sm text-gray-400">
-                    공시를 불러올 수 없습니다.
+                    최근 공시가 없습니다.
                   </div>
                 ) : (
-                  feeds
-                    .filter((f) => f.disclosures.length > 0)
-                    .map((f) => (
-                      <div key={`disc-${f.ticker}`} className="px-5 py-3">
-                        <div className="flex items-center justify-between mb-2">
-                          <p className="text-xs font-semibold text-gray-700">
-                            {f.companyName}{" "}
-                            <span className="text-gray-400 font-normal">({f.ticker})</span>
-                          </p>
-                        </div>
-                        <ul className="space-y-1.5">
-                          {f.disclosures.slice(0, 4).map((d, i) => (
-                            <li key={i} className="flex items-start gap-2 text-xs">
-                              <a
-                                href={d.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="flex-1 text-gray-700 hover:text-[#0A2A5E] hover:underline line-clamp-1"
-                              >
-                                {d.title}
-                              </a>
-                              <span className="text-gray-400 tabular-nums whitespace-nowrap">
-                                {d.date}
-                              </span>
-                              <ExternalLink className="h-3 w-3 text-gray-300 mt-0.5 flex-shrink-0" />
-                            </li>
-                          ))}
-                        </ul>
+                  disclosures.map((d, i) => (
+                    <a
+                      key={i}
+                      href={d.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block px-5 py-3 hover:bg-gray-50 transition-colors"
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-xs font-medium text-[#0A2A5E]">
+                          {d.companyName}
+                        </span>
+                        <span className="text-xs text-gray-400 tabular-nums ml-auto">
+                          {d.date}
+                        </span>
                       </div>
-                    ))
+                      <p className="text-sm text-gray-800 line-clamp-2">
+                        {d.title}
+                        <ExternalLink className="inline h-3 w-3 text-gray-300 ml-1" />
+                      </p>
+                    </a>
+                  ))
                 )}
-                {feeds.length > 0 &&
-                  feeds.every((f) => f.disclosures.length === 0) &&
-                  !feedsLoading && (
-                    <div className="px-5 py-8 text-center text-sm text-gray-400">
-                      최근 공시가 없습니다.
-                    </div>
-                  )}
               </div>
             </Card>
           </div>
