@@ -13,6 +13,7 @@ export const runtime = "nodejs";
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const raw = searchParams.get("tickers") ?? "";
+  const skipSave = searchParams.get("save") === "false";
   const tickers = Array.from(
     new Set(
       raw
@@ -47,8 +48,9 @@ export async function GET(req: NextRequest) {
   }
 
   // 성공한 종목에 대해 스냅샷 저장 (활성 포지션이 있는 것만)
+  // 대시보드처럼 반복 조회하는 곳은 save=false로 DB 쓰기 스킵 (응답 시간 절반)
   const successful = results.filter((r): r is NaverQuote => "price" in r);
-  if (successful.length > 0) {
+  if (successful.length > 0 && !skipSave) {
     const tickerSet = successful.map((q) => q.ticker);
     const positions = await prisma.position.findMany({
       where: { underlyingTicker: { in: tickerSet }, isActive: true },

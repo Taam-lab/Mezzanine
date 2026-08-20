@@ -91,7 +91,8 @@ export default function PositionsPage() {
     setRefreshing(true);
     setPriceError(null);
     try {
-      const res = await fetch(`/api/prices?tickers=${uniq.join(",")}`);
+      // save=false: 매 60초 폴링에서 DB에 스냅샷 안 씀 → 응답 시간 반토막
+      const res = await fetch(`/api/prices?tickers=${uniq.join(",")}&save=false`);
       const data = await res.json();
       if (!res.ok) {
         setPriceError(data.error || `시세 조회 실패 (HTTP ${res.status})`);

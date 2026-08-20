@@ -7,8 +7,8 @@ export const maxDuration = 15;
 interface FeedItem {
   title: string;
   url: string;
-  date: string; // 표시용 원본 (YYYY.MM.DD HH:mm 또는 YYYY.MM.DD)
-  isoDate: string; // 정렬용 (YYYY-MM-DD 또는 YYYY-MM-DDTHH:mm)
+  date: string;
+  isoDate: string;
   source?: string;
   ticker: string;
   companyName: string;
@@ -26,19 +26,43 @@ interface ComputedAlert {
   kind: "disclosure";
 }
 
-/**
- * Naver Finance는 응답이 EUC-KR인 페이지가 있고 UTF-8인 페이지가 있음.
- * Content-Type 헤더의 charset을 먼저 보고 없으면 EUC-KR로 시도.
- */
-async function fetchHtml(url: string): Promise<string | null> {
+// ─────────────────────────────────────────────
+// 캐시: 티커별 90초 in-memory (Naver / Google 서버 반복 히트 회피 + 재로딩 즉시 반환)
+// ─────────────────────────────────────────────
+interface CacheEntry<T> {
+  ts: number;
+  value: T;
+}
+const CACHE_TTL_MS = 90_000;
+const newsCache = new Map<string, CacheEntry<FeedItem[]>>();
+const disclosureCache = new Map<string, CacheEntry<FeedItem[]>>();
+
+function getCached<T>(map: Map<string, CacheEntry<T>>, key: string): T | null {
+  const hit = map.get(key);
+  if (!hit) return null;
+  if (Date.now() - hit.ts > CACHE_TTL_MS) {
+    map.delete(key);
+    return null;
+  }
+  return hit.value;
+}
+
+function setCached<T>(map: Map<string, CacheEntry<T>>, key: string, value: T) {
+  map.set(key, { ts: Date.now(), value });
+}
+
+// ─────────────────────────────────────────────
+// HTTP fetch — 짧은 타임아웃, 인코딩 자동 감지
+// ─────────────────────────────────────────────
+async function fetchText(url: string, timeout = 3500): Promise<string | null> {
   try {
     const res = await fetch(url, {
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
-        Accept: "text/html,application/xhtml+xml",
+        Accept: "text/html,application/xhtml+xml,application/xml",
       },
-      signal: AbortSignal.timeout(6000),
+      signal: AbortSignal.timeout(timeout),
     });
     if (!res.ok) return null;
     const buf = await res.arrayBuffer();
@@ -46,9 +70,11 @@ async function fetchHtml(url: string): Promise<string | null> {
     const charsetMatch = ct.match(/charset=([\w\-]+)/i);
     let encoding = charsetMatch ? charsetMatch[1].toLowerCase() : "";
     if (!encoding) {
-      const sniff = new TextDecoder("latin1").decode(buf);
-      const metaMatch = sniff.match(/<meta[^>]+charset=["']?([\w\-]+)/i);
-      encoding = metaMatch ? metaMatch[1].toLowerCase() : "euc-kr";
+      const sniff = new TextDecoder("latin1").decode(buf.slice(0, 2048));
+      const metaMatch =
+        sniff.match(/<meta[^>]+charset=["']?([\w\-]+)/i) ??
+        sniff.match(/encoding=["']([\w\-]+)/i);
+      encoding = metaMatch ? metaMatch[1].toLowerCase() : "utf-8";
     }
     try {
       return new TextDecoder(encoding).decode(buf);
@@ -68,78 +94,111 @@ function decodeHtmlEntities(s: string): string {
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .replace(/&nbsp;/g, " ")
-    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(parseInt(n, 10)));
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(parseInt(n, 10)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCharCode(parseInt(n, 16)));
 }
 
 /**
- * "2026.08.19 15:23" 또는 "2026.08.19" 형태를 정렬용 ISO로 변환.
- * 실패 시 원본 반환.
+ * "2026.08.19 15:23" → ISO
+ * "Wed, 19 Aug 2026 15:23:00 GMT" → ISO
  */
-function toIso(display: string): string {
-  const m = display.match(/(\d{4})[.\-/](\d{1,2})[.\-/](\d{1,2})(?:\s+(\d{1,2}):(\d{2}))?/);
-  if (!m) return display;
+function toIsoLoose(display: string): string {
+  const kr = display.match(/(\d{4})[.\-/](\d{1,2})[.\-/](\d{1,2})(?:\s+(\d{1,2}):(\d{2}))?/);
+  if (kr) {
+    const [, y, mo, d, h, mi] = kr;
+    const pad = (v: string) => v.padStart(2, "0");
+    return `${y}-${pad(mo)}-${pad(d)}${h ? `T${pad(h)}:${mi}` : ""}`;
+  }
+  // RFC 2822 (Google News pubDate) 시도
+  const t = Date.parse(display);
+  if (!Number.isNaN(t)) {
+    const d = new Date(t);
+    return d.toISOString().slice(0, 16); // YYYY-MM-DDTHH:mm
+  }
+  return display;
+}
+
+function formatDisplayFromIso(iso: string): string {
+  const m = iso.match(/(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?/);
+  if (!m) return iso;
   const [, y, mo, d, h, mi] = m;
-  const pad = (v: string) => v.padStart(2, "0");
-  return `${y}-${pad(mo)}-${pad(d)}${h ? `T${pad(h)}:${mi}` : ""}`;
+  return h ? `${y}.${mo}.${d} ${h}:${mi}` : `${y}.${mo}.${d}`;
 }
 
-/**
- * Naver Finance 종목별 뉴스 스크래핑.
- * https://finance.naver.com/item/news_news.naver?code={ticker}&page=1
- */
-async function fetchNaverNews(
-  ticker: string,
-  companyName: string,
-): Promise<FeedItem[]> {
-  const url = `https://finance.naver.com/item/news_news.naver?code=${ticker}&page=1&sm=title_entity_id.basic&clusterId=`;
-  const html = await fetchHtml(url);
-  if (!html) return [];
+// ─────────────────────────────────────────────
+// 뉴스: Google News RSS (UTF-8, XML — 인코딩 안전, 안정적)
+// ─────────────────────────────────────────────
+async function fetchGoogleNews(ticker: string, companyName: string): Promise<FeedItem[]> {
+  const cacheKey = `news:${ticker}`;
+  const hit = getCached(newsCache, cacheKey);
+  if (hit) return hit;
+
+  // 회사명 + 종목코드 + 주식 키워드로 노이즈 감소
+  const q = encodeURIComponent(`${companyName} 주식`);
+  const url = `https://news.google.com/rss/search?q=${q}&hl=ko&gl=KR&ceid=KR:ko`;
+  const xml = await fetchText(url, 4000);
+  if (!xml) {
+    setCached(newsCache, cacheKey, []);
+    return [];
+  }
 
   const items: FeedItem[] = [];
-  const rowRe = /<tr[^>]*>([\s\S]*?)<\/tr>/g;
+  const itemRe = /<item>([\s\S]*?)<\/item>/g;
   let m: RegExpExecArray | null;
-  while ((m = rowRe.exec(html)) !== null && items.length < 8) {
-    const row = m[1];
-    if (!row.includes('class="title"')) continue;
-    const titleMatch = row.match(
-      /<td[^>]*class=["']?title["']?[^>]*>[\s\S]*?<a[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/,
-    );
-    const dateMatch = row.match(/<td[^>]*class=["']?date["']?[^>]*>([\s\S]*?)<\/td>/);
-    const infoMatch = row.match(/<td[^>]*class=["']?info["']?[^>]*>([\s\S]*?)<\/td>/);
-    if (!titleMatch) continue;
+  while ((m = itemRe.exec(xml)) !== null && items.length < 8) {
+    const inner = m[1];
+    const titleMatch = inner.match(/<title>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/);
+    const linkMatch = inner.match(/<link>([\s\S]*?)<\/link>/);
+    const pubMatch = inner.match(/<pubDate>([\s\S]*?)<\/pubDate>/);
+    const sourceMatch = inner.match(/<source[^>]*>([\s\S]*?)<\/source>/);
+    if (!titleMatch || !linkMatch) continue;
 
-    const href = titleMatch[1].startsWith("http")
-      ? titleMatch[1]
-      : `https://finance.naver.com${titleMatch[1]}`;
-    const title = decodeHtmlEntities(titleMatch[2].replace(/<[^>]+>/g, "").trim());
-    const date = dateMatch ? dateMatch[1].replace(/<[^>]+>/g, "").trim() : "";
-    const info = infoMatch ? infoMatch[1].replace(/<[^>]+>/g, "").trim() : undefined;
-    if (title) {
-      items.push({
-        title,
-        url: href,
-        date,
-        isoDate: toIso(date),
-        source: info,
-        ticker,
-        companyName,
-      });
+    const rawTitle = decodeHtmlEntities(titleMatch[1].trim());
+    // Google News 제목은 "제목 - 언론사" 형식 — 언론사 분리
+    let title = rawTitle;
+    let source = sourceMatch ? decodeHtmlEntities(sourceMatch[1].trim()) : undefined;
+    const sep = rawTitle.lastIndexOf(" - ");
+    if (sep !== -1 && !source) {
+      title = rawTitle.slice(0, sep).trim();
+      source = rawTitle.slice(sep + 3).trim();
+    } else if (sep !== -1) {
+      title = rawTitle.slice(0, sep).trim();
     }
+
+    const link = linkMatch[1].trim();
+    const iso = pubMatch ? toIsoLoose(pubMatch[1].trim()) : "";
+    items.push({
+      title,
+      url: link,
+      date: formatDisplayFromIso(iso) || pubMatch?.[1] || "",
+      isoDate: iso,
+      source,
+      ticker,
+      companyName,
+    });
   }
+
+  setCached(newsCache, cacheKey, items);
   return items;
 }
 
-/**
- * Naver Finance 종목별 공시 (전자공시).
- * https://finance.naver.com/item/news_notice.naver?code={ticker}&page=1
- */
+// ─────────────────────────────────────────────
+// 공시: Naver Finance news_notice (rcpNo → DART 뷰어)
+// ─────────────────────────────────────────────
 async function fetchNaverDisclosures(
   ticker: string,
   companyName: string,
 ): Promise<FeedItem[]> {
+  const cacheKey = `disc:${ticker}`;
+  const hit = getCached(disclosureCache, cacheKey);
+  if (hit) return hit;
+
   const url = `https://finance.naver.com/item/news_notice.naver?code=${ticker}&page=1`;
-  const html = await fetchHtml(url);
-  if (!html) return [];
+  const html = await fetchText(url, 4000);
+  if (!html) {
+    setCached(disclosureCache, cacheKey, []);
+    return [];
+  }
 
   const items: FeedItem[] = [];
   const rowRe = /<tr[^>]*>([\s\S]*?)<\/tr>/g;
@@ -165,21 +224,17 @@ async function fetchNaverDisclosures(
         title,
         url: href,
         date,
-        isoDate: toIso(date),
+        isoDate: toIsoLoose(date),
         ticker,
         companyName,
       });
     }
   }
+
+  setCached(disclosureCache, cacheKey, items);
   return items;
 }
 
-/**
- * 공시 제목에서 알림 심각도 판정.
- *  - CRITICAL: 실적/영업실적/영업(잠정)실적, 사업보고서, 분기보고서, 반기보고서, 매출액/손익구조 변경
- *  - WARNING: 조회일 기준 전일/당일 공시 (그 외)
- *  - null: 알림 대상 아님
- */
 function classifyDisclosure(
   d: FeedItem,
   todayIso: string,
@@ -190,7 +245,7 @@ function classifyDisclosure(
     /사업보고서|분기보고서|반기보고서/.test(title) ||
     /(?:영업|매출|손익).{0,15}(?:실적|구조|변경)/.test(title) ||
     /영업\s*\(?잠정\)?\s*실적/.test(title) ||
-    /주요경영사항|현금·현물배당결정|주요사항보고서.*매출/.test(title);
+    /주요경영사항|현금·현물배당결정/.test(title);
   if (critical) return "CRITICAL";
   const day = d.isoDate.slice(0, 10);
   if (day === todayIso || day === yesterdayIso) return "WARNING";
@@ -202,17 +257,12 @@ async function fetchOneTicker(
   companyName: string,
 ): Promise<{ news: FeedItem[]; disclosures: FeedItem[] }> {
   const [news, disclosures] = await Promise.all([
-    fetchNaverNews(ticker, companyName).catch(() => []),
+    fetchGoogleNews(ticker, companyName).catch(() => []),
     fetchNaverDisclosures(ticker, companyName).catch(() => []),
   ]);
   return { news, disclosures };
 }
 
-/**
- * GET /api/dashboard/feed?tickers=005930:삼성전자,000660:SK하이닉스
- * ticker:companyName 쌍으로 넘기고, 뉴스/공시를 flat + date desc 로 반환.
- * 공시 기반 실시간 알림도 계산해서 함께 반환 (가격 알림은 클라이언트에서 계산).
- */
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const tickersParam = searchParams.get("tickers");
@@ -224,7 +274,10 @@ export async function GET(req: NextRequest) {
     .split(",")
     .map((chunk) => {
       const [t, name] = chunk.split(":");
-      return { ticker: t?.trim() ?? "", companyName: name?.trim() ?? t?.trim() ?? "" };
+      return {
+        ticker: t?.trim() ?? "",
+        companyName: name ? decodeURIComponent(name.trim()) : t?.trim() ?? "",
+      };
     })
     .filter((e) => /^\d{6}$/.test(e.ticker))
     .slice(0, 20);
@@ -247,9 +300,8 @@ export async function GET(req: NextRequest) {
   allNews.sort((a, b) => (a.isoDate < b.isoDate ? 1 : a.isoDate > b.isoDate ? -1 : 0));
   allDisc.sort((a, b) => (a.isoDate < b.isoDate ? 1 : a.isoDate > b.isoDate ? -1 : 0));
 
-  // 알림 계산: 오늘/어제 (KST 기준)
   const now = new Date();
-  const kstOffset = 9 * 60; // KST = UTC+9
+  const kstOffset = 9 * 60;
   const kstNow = new Date(now.getTime() + kstOffset * 60000);
   const todayIso = kstNow.toISOString().slice(0, 10);
   const yesterday = new Date(kstNow);

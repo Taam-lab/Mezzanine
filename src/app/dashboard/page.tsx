@@ -81,13 +81,18 @@ export default function DashboardPage() {
   const [feedsLoading, setFeedsLoading] = useState(false);
   const [alertList, setAlertList] = useState<UiAlert[]>([]);
 
+  // 대시보드 로드 = 3단계로 나누어 각 단계가 화면에 즉시 반영되게.
+  //   1) positions (빠름, ms 수준) → 상단 요약카드/스켈레톤 뜸
+  //   2) prices + DB alerts (병렬, 1-2초) → 시세/알림 채워짐
+  //   3) 뉴스/공시 feed (Google News + Naver 스크래핑, 2-4초) → 하단 카드 채워짐
+  // 이전엔 Promise.all로 전부 기다렸기 때문에 가장 느린 것 하나 때문에 화면 전체가 멈춰있었음.
   async function loadDashboard() {
     setLoading(true);
+    setFeedsLoading(true);
     try {
       const posRes = await fetch("/api/positions");
       const positions = (await posRes.json()) as PositionSlim[];
 
-      // 활성 종목 티커별 실시간 시세 (병렬)
       const tickerNameMap = new Map<string, string>();
       for (const p of positions) {
         if (!p.isActive || !/^\d{6}$/.test(p.underlyingTicker)) continue;
@@ -100,20 +105,25 @@ export default function DashboardPage() {
         .map(([t, n]) => `${t}:${encodeURIComponent(n)}`)
         .join(",");
 
-      const [priceRes, dbAlertRes, feedRes] = await Promise.all([
-        tickers.length
-          ? fetch(`/api/prices?tickers=${tickers.join(",")}`).then((r) => r.json())
-          : Promise.resolve({ quotes: {} }),
-        fetch("/api/alerts?limit=20").then((r) => r.json()),
-        tickers.length
-          ? fetch(`/api/dashboard/feed?tickers=${tickerNameEntries}`).then((r) => r.json())
-          : Promise.resolve({ news: [], disclosures: [], alerts: [] }),
-      ]);
+      setStats({ totalPositions: positions.length, topMovers: [] });
+      setLastUpdated(new Date());
+      setLoading(false);
 
-      const quotes = (priceRes as { quotes: Record<string, { price?: number; changeRate?: number }> })
-        .quotes ?? {};
+      // Step 2: 시세 + DB 알림 (병렬) — save=false로 DB 쓰기 스킵해 응답 시간 절반
+      const pricesPromise = tickers.length
+        ? fetch(`/api/prices?tickers=${tickers.join(",")}&save=false`)
+            .then((r) => r.json())
+            .catch(() => ({ quotes: {} }))
+        : Promise.resolve({ quotes: {} });
+      const dbAlertPromise = fetch("/api/alerts?limit=20")
+        .then((r) => r.json())
+        .catch(() => []);
 
-      // Movers: 활성 종목 + 방금 조회한 시세로 절대 등락률 기준 정렬
+      const [priceRes, dbAlertRes] = await Promise.all([pricesPromise, dbAlertPromise]);
+      const quotes =
+        (priceRes as { quotes: Record<string, { price?: number; changeRate?: number }> })
+          .quotes ?? {};
+
       const movers: Mover[] = positions
         .filter((p) => p.isActive)
         .map((p) => {
@@ -131,7 +141,6 @@ export default function DashboardPage() {
         .sort((a, b) => Math.abs(b.changeRate ?? 0) - Math.abs(a.changeRate ?? 0))
         .slice(0, 5);
 
-      // 가격 기반 알림 계산: ±10% CRITICAL, ±5% WARNING (활성 종목 전체 대상)
       const priceAlerts: UiAlert[] = [];
       const nowIso = new Date().toISOString();
       for (const p of positions) {
@@ -152,7 +161,7 @@ export default function DashboardPage() {
           });
         } else if (abs >= 5) {
           priceAlerts.push({
-            severity: rate >= 0 ? "WARNING" : "WARNING",
+            severity: "WARNING",
             title: `[${p.underlyingCompanyName}] 주가 ${rate >= 0 ? "+" : ""}${rate.toFixed(2)}%`,
             date: formatDateTime(new Date()),
             isoDate: nowIso,
@@ -163,23 +172,6 @@ export default function DashboardPage() {
         }
       }
 
-      // 공시 기반 알림 (feed API에서 계산됨)
-      const feedData = feedRes as {
-        news: FeedItem[];
-        disclosures: FeedItem[];
-        alerts: Array<{ severity: "CRITICAL" | "WARNING" | "INFO"; title: string; url?: string; date: string; isoDate: string; ticker: string }>;
-      };
-      const disclosureAlerts: UiAlert[] = (feedData.alerts ?? []).map((a) => ({
-        severity: a.severity,
-        title: a.title,
-        url: a.url,
-        date: a.date,
-        isoDate: a.isoDate,
-        kind: "disclosure",
-        ticker: a.ticker,
-      }));
-
-      // DB 알림 (Alert 테이블에 저장된 것 — 스케줄러가 있으면 채워짐)
       const dbAlerts: UiAlert[] = (dbAlertRes as DbAlertItem[]).map((a) => ({
         severity: (["CRITICAL", "WARNING", "INFO"].includes(a.severity)
           ? a.severity
@@ -191,27 +183,59 @@ export default function DashboardPage() {
         kind: "db",
       }));
 
-      const merged = [...priceAlerts, ...disclosureAlerts, ...dbAlerts].sort((a, b) =>
-        a.isoDate < b.isoDate ? 1 : a.isoDate > b.isoDate ? -1 : 0,
+      setStats({ totalPositions: positions.length, topMovers: movers });
+      setAlertList(
+        [...priceAlerts, ...dbAlerts].sort((a, b) =>
+          a.isoDate < b.isoDate ? 1 : a.isoDate > b.isoDate ? -1 : 0,
+        ),
       );
 
-      setNews(feedData.news ?? []);
-      setDisclosures(feedData.disclosures ?? []);
-      setAlertList(merged);
-      setFeedsLoading(false);
-
-      setStats({
-        totalPositions: positions.length,
-        topMovers: movers,
-      });
-      setLastUpdated(new Date());
-    } finally {
+      // Step 3: 뉴스/공시 (백그라운드, 완료되면 알림에 병합)
+      if (tickers.length === 0) {
+        setFeedsLoading(false);
+        return;
+      }
+      fetch(`/api/dashboard/feed?tickers=${tickerNameEntries}`)
+        .then((r) => r.json())
+        .then((feedRes) => {
+          const feedData = feedRes as {
+            news: FeedItem[];
+            disclosures: FeedItem[];
+            alerts: Array<{
+              severity: "CRITICAL" | "WARNING" | "INFO";
+              title: string;
+              url?: string;
+              date: string;
+              isoDate: string;
+              ticker: string;
+            }>;
+          };
+          const disclosureAlerts: UiAlert[] = (feedData.alerts ?? []).map((a) => ({
+            severity: a.severity,
+            title: a.title,
+            url: a.url,
+            date: a.date,
+            isoDate: a.isoDate,
+            kind: "disclosure",
+            ticker: a.ticker,
+          }));
+          setNews(feedData.news ?? []);
+          setDisclosures(feedData.disclosures ?? []);
+          setAlertList((prev) =>
+            [...prev, ...disclosureAlerts].sort((a, b) =>
+              a.isoDate < b.isoDate ? 1 : a.isoDate > b.isoDate ? -1 : 0,
+            ),
+          );
+        })
+        .catch(() => {})
+        .finally(() => setFeedsLoading(false));
+    } catch {
       setLoading(false);
+      setFeedsLoading(false);
     }
   }
 
   useEffect(() => {
-    setFeedsLoading(true);
     loadDashboard();
   }, []);
 
