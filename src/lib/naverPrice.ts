@@ -40,7 +40,7 @@ const NAVER_HEADERS = {
 /** 1차: polling.finance.naver.com — 응답이 { datas: [ {...} ] } */
 async function fetchViaPolling(ticker: string): Promise<NaverQuote> {
   const url = `https://polling.finance.naver.com/api/realtime/domestic/stock/${ticker}`;
-  const res = await fetch(url, { signal: AbortSignal.timeout(4000), headers: NAVER_HEADERS });
+  const res = await fetch(url, { signal: AbortSignal.timeout(4000), headers: NAVER_HEADERS, cache: "no-store" });
   if (!res.ok) throw new Error(`polling HTTP ${res.status}`);
   const data = (await res.json()) as NaverPollingResponse;
   const row = data.datas?.[0];
@@ -62,7 +62,7 @@ async function fetchViaPolling(ticker: string): Promise<NaverQuote> {
 /** 2차: api.stock.naver.com — 응답이 flat object (fallback) */
 async function fetchViaApiStock(ticker: string): Promise<NaverQuote> {
   const url = `https://api.stock.naver.com/stock/${ticker}/basic`;
-  const res = await fetch(url, { signal: AbortSignal.timeout(4000), headers: NAVER_HEADERS });
+  const res = await fetch(url, { signal: AbortSignal.timeout(4000), headers: NAVER_HEADERS, cache: "no-store" });
   if (!res.ok) throw new Error(`api.stock HTTP ${res.status}`);
   const row = (await res.json()) as Record<string, unknown>;
   const price = toNum(row.closePrice as string | undefined);

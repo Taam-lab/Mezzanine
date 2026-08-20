@@ -91,8 +91,11 @@ export default function PositionsPage() {
     setRefreshing(true);
     setPriceError(null);
     try {
-      // save=false: 매 60초 폴링에서 DB에 스냅샷 안 씀 → 응답 시간 반토막
-      const res = await fetch(`/api/prices?tickers=${uniq.join(",")}&save=false`);
+      // save=false: DB 스냅샷 스킵 → 응답 시간 반토막
+      // t=Date.now(): 브라우저/CDN 캐시 무시하고 매 호출마다 fresh 응답
+      const res = await fetch(`/api/prices?tickers=${uniq.join(",")}&save=false&t=${Date.now()}`, {
+        cache: "no-store",
+      });
       const data = await res.json();
       if (!res.ok) {
         setPriceError(data.error || `시세 조회 실패 (HTTP ${res.status})`);

@@ -110,8 +110,11 @@ export default function DashboardPage() {
       setLoading(false);
 
       // Step 2: 시세 + DB 알림 (병렬) — save=false로 DB 쓰기 스킵해 응답 시간 절반
+      // cache: "no-store" + 캐시버스팅 파라미터: 새로고침 버튼 누를 때마다 브라우저·프록시 캐시 무시하고 새로 조회
       const pricesPromise = tickers.length
-        ? fetch(`/api/prices?tickers=${tickers.join(",")}&save=false`)
+        ? fetch(`/api/prices?tickers=${tickers.join(",")}&save=false&t=${Date.now()}`, {
+            cache: "no-store",
+          })
             .then((r) => r.json())
             .catch(() => ({ quotes: {} }))
         : Promise.resolve({ quotes: {} });

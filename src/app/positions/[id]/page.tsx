@@ -166,7 +166,7 @@ export default function PositionDetailPage() {
   async function refreshPrice(t: string) {
     setRefreshingPrice(true);
     try {
-      const res = await fetch(`/api/prices/${t}`);
+      const res = await fetch(`/api/prices/${t}?t=${Date.now()}`, { cache: "no-store" });
       if (res.ok) {
         const data = await res.json();
         setLivePrice({
