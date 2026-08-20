@@ -12,13 +12,32 @@ import { ArrowLeft } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { positionSchema, type PositionInput } from "@/lib/validations";
-import { MEZZANINE_TYPE_LABEL, INVESTMENT_TYPE_LABEL, formatDate } from "@/lib/utils";
+import { MEZZANINE_TYPE_LABEL, INVESTMENT_TYPE_LABEL } from "@/lib/utils";
+
+// Prisma Decimal / BigInt 는 API 응답 시 문자열로 직렬화된다.
+// 스키마의 z.number()는 문자열을 거부하므로 reset 전에 number로 변환.
+function toNum(v: unknown): number | undefined {
+  if (v === null || v === undefined || v === "") return undefined;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function toDateStr(v: unknown): string {
+  if (!v || typeof v !== "string") return "";
+  return v.split("T")[0];
+}
+
+function toStr(v: unknown): string {
+  if (v === null || v === undefined) return "";
+  return String(v);
+}
 
 export default function EditPositionPage() {
   const params = useParams();
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const {
     register,
@@ -34,17 +53,35 @@ export default function EditPositionPage() {
       .then((r) => r.json())
       .then((data) => {
         reset({
-          ...data,
-          issueDate: data.issueDate ? data.issueDate.split("T")[0] : "",
-          maturityDate: data.maturityDate ? data.maturityDate.split("T")[0] : "",
-          conversionStartDate: data.conversionStartDate ? data.conversionStartDate.split("T")[0] : "",
-          conversionEndDate: data.conversionEndDate ? data.conversionEndDate.split("T")[0] : "",
-          putOptionStartDate: data.putOptionStartDate ? data.putOptionStartDate.split("T")[0] : "",
-          putOptionEndDate: data.putOptionEndDate ? data.putOptionEndDate.split("T")[0] : "",
-          callOptionStartDate: data.callOptionStartDate ? data.callOptionStartDate.split("T")[0] : "",
-          callOptionEndDate: data.callOptionEndDate ? data.callOptionEndDate.split("T")[0] : "",
-          investmentAmount: data.investmentAmount ? Number(data.investmentAmount) : undefined,
-          issueAmount: data.issueAmount ? Number(data.issueAmount) : undefined,
+          assetName: toStr(data.assetName),
+          bondCode: toStr(data.bondCode),
+          underlyingTicker: toStr(data.underlyingTicker),
+          underlyingCompanyName: toStr(data.underlyingCompanyName),
+          underlyingMarket: data.underlyingMarket ?? "KOSPI",
+          mezzanineType: data.mezzanineType ?? "CB",
+          investmentType: data.investmentType ?? "DIRECT",
+          investmentAmount: toNum(data.investmentAmount),
+          issueAmount: toNum(data.issueAmount),
+          issueDate: toDateStr(data.issueDate),
+          maturityDate: toDateStr(data.maturityDate),
+          couponRate: toNum(data.couponRate),
+          ytm: toNum(data.ytm),
+          seriesNumber: toNum(data.seriesNumber),
+          initialConversionPrice: toNum(data.initialConversionPrice),
+          minConversionPrice: toNum(data.minConversionPrice),
+          currentConversionPrice: toNum(data.currentConversionPrice),
+          conversionStartDate: toDateStr(data.conversionStartDate),
+          conversionEndDate: toDateStr(data.conversionEndDate),
+          putOptionRate: toNum(data.putOptionRate),
+          putOptionStartDate: toDateStr(data.putOptionStartDate),
+          putOptionEndDate: toDateStr(data.putOptionEndDate),
+          putOptionSchedule: toStr(data.putOptionSchedule),
+          callOptionRatio: toNum(data.callOptionRatio),
+          callOptionRate: toNum(data.callOptionRate),
+          callOptionStartDate: toDateStr(data.callOptionStartDate),
+          callOptionEndDate: toDateStr(data.callOptionEndDate),
+          sourceDisclosureUrl: toStr(data.sourceDisclosureUrl),
+          note: toStr(data.note),
         });
         setLoading(false);
       });
@@ -52,15 +89,31 @@ export default function EditPositionPage() {
 
   async function onSubmit(data: PositionInput) {
     setSaving(true);
-    const res = await fetch(`/api/positions/${params.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    });
-    setSaving(false);
-    if (res.ok) {
-      router.push(`/positions/${params.id}`);
+    setSaveError(null);
+    try {
+      const res = await fetch(`/api/positions/${params.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (res.ok) {
+        router.push(`/positions/${params.id}`);
+        return;
+      }
+      const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+      setSaveError(err.error ?? `저장 실패 (HTTP ${res.status})`);
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
     }
+  }
+
+  function onInvalid(errs: unknown) {
+    const first = Object.entries(errs as Record<string, { message?: string }>)[0];
+    setSaveError(
+      first ? `입력 오류: ${first[0]} — ${first[1]?.message ?? "invalid"}` : "입력값을 확인해주세요.",
+    );
   }
 
   if (loading) {
@@ -86,7 +139,13 @@ export default function EditPositionPage() {
           <h1 className="text-xl font-bold text-gray-900">종목 수정</h1>
         </div>
 
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
+        {saveError && (
+          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+            {saveError}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit(onSubmit, onInvalid)} className="space-y-5">
           <Card>
             <CardHeader><CardTitle>기본 정보</CardTitle></CardHeader>
             <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -133,6 +192,25 @@ export default function EditPositionPage() {
               <Input label="현재 전환가" type="number" step="0.01" {...register("currentConversionPrice", { valueAsNumber: true })} />
               <Input label="전환 가능 시작일" type="date" {...register("conversionStartDate")} />
               <Input label="전환 가능 종료일" type="date" {...register("conversionEndDate")} />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader><CardTitle>Put Option (조기상환청구권)</CardTitle></CardHeader>
+            <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Input label="Put 시작일" type="date" {...register("putOptionStartDate")} />
+              <Input label="Put 종료일" type="date" {...register("putOptionEndDate")} />
+              <Input label="Put 수익률 (%)" type="number" step="0.001" {...register("putOptionRate", { valueAsNumber: true })} />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader><CardTitle>Call Option (매도청구권)</CardTitle></CardHeader>
+            <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Input label="Call 시작일" type="date" {...register("callOptionStartDate")} />
+              <Input label="Call 종료일" type="date" {...register("callOptionEndDate")} />
+              <Input label="Call 비율 (%)" type="number" step="0.001" {...register("callOptionRatio", { valueAsNumber: true })} />
+              <Input label="Call 이율 (%)" type="number" step="0.001" {...register("callOptionRate", { valueAsNumber: true })} />
             </CardContent>
           </Card>
 

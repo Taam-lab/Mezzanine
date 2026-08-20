@@ -12,7 +12,7 @@
  * 【매도청구권 (콜옵션)】
  *   매도청구권(Call Option)에 관한 사항
  *   ...
- *   구분 | 매매대금 지급기일 | 매매가액
+ *   회차  매매대금 지급기일  매매가액
  *   1차   YYYY-MM-DD          전자등록금액의 XXX.XXXX%
  *   2차   YYYY-MM-DD          ...
  *   ...
@@ -48,7 +48,6 @@ function extractAllDates(text: string): string[] {
   while ((m = re.exec(text)) !== null) {
     const [, y, mo, d] = m;
     const iso = normalizeDate(y, mo, d);
-    // 유효 날짜만 (월 1-12, 일 1-31)
     const mm = parseInt(mo, 10);
     const dd = parseInt(d, 10);
     if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) dates.push(iso);
@@ -56,39 +55,77 @@ function extractAllDates(text: string): string[] {
   return dates;
 }
 
+/**
+ * "매도청구권" 이나 "Call Option" 이 여러 번 등장할 수 있음 (목차, 요약, 본문).
+ * 실제 내용이 있는 위치를 고르기 위해 각 매칭 지점에서 2000자 뒤에 실제 내용 마커
+ * (매매대금, 매매가액, 행사가액, N차, 지급기일) 가 있는지 확인.
+ * 없으면 다음 매칭으로.
+ */
+function findCallSectionStart(text: string): number {
+  const re = /매도청구권|Call\s*Option/gi;
+  const content = /매매대금|매매가액|매매대금\s*지급|지급\s*기일|행사\s*가액|\d\s*차\s+\d{4}/;
+  let m: RegExpExecArray | null;
+  let bestIdx = -1;
+  while ((m = re.exec(text)) !== null) {
+    const window = text.slice(m.index, m.index + 3000);
+    if (content.test(window)) {
+      return m.index; // 첫 번째 실제 내용을 가진 매칭
+    }
+    if (bestIdx === -1) bestIdx = m.index;
+  }
+  return bestIdx;
+}
+
 /** 정형 API가 못 넘겨준 풋/콜 옵션 필드를 텍스트에서 추출 */
 export function extractPutCall(text: string): PutCallExtraction {
   const result: PutCallExtraction = {};
 
   // ─────────────────────────────────────────────
-  // 콜옵션 (매도청구권) — "Call Option" 이 가장 신뢰성 높은 마커
+  // 콜옵션 (매도청구권)
   // ─────────────────────────────────────────────
-  const callIdx = text.search(/Call\s*Option|매도청구권/i);
+  const callIdx = findCallSectionStart(text);
   if (callIdx !== -1) {
-    // 매도청구권 섹션은 표(1차~N차)를 포함하므로 넉넉하게 3000자
-    const callSec = text.slice(callIdx, callIdx + 3000);
+    // 5000자로 확대 — 표가 만기까지 이어질 수 있고 서두 산문+표가 이어짐
+    const callSec = text.slice(callIdx, callIdx + 5000);
 
-    // 날짜: "매매대금 지급기일" 표에서 첫/마지막 날짜
-    const paymentIdx = callSec.search(/매매대금\s*지급\s*기일/);
-    if (paymentIdx !== -1) {
-      const payWindow = callSec.slice(paymentIdx, paymentIdx + 1500);
-      const dates = extractAllDates(payWindow);
-      if (dates.length >= 1) result.callOptionStartDate = dates[0];
-      if (dates.length >= 2) result.callOptionEndDate = dates[dates.length - 1];
+    // 1순위: 표 행 패턴 "N차 <date>" — 매매대금 지급기일이 나열되는 표
+    // 뒤에 매매가액 %가 오는 경우가 많지만, 필수는 아님
+    const rowRe = /(?:\d{1,3}|[제])\s*차\D{0,20}(\d{4})[년\-./\s]{1,3}(\d{1,2})[월\-./\s]{1,3}(\d{1,2})[일]?/g;
+    const rowDates: string[] = [];
+    let rm: RegExpExecArray | null;
+    while ((rm = rowRe.exec(callSec)) !== null) {
+      const iso = normalizeDate(rm[1], rm[2], rm[3]);
+      const mm = parseInt(rm[2], 10);
+      const dd = parseInt(rm[3], 10);
+      if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) rowDates.push(iso);
+    }
+
+    if (rowDates.length >= 1) {
+      result.callOptionStartDate = rowDates[0];
+      result.callOptionEndDate = rowDates[rowDates.length - 1];
     } else {
-      // 표 없이 서두 산문에 "12개월이 되는 날(YYYY-MM-DD)... 24개월이 되는 날(YYYY-MM-DD)" 로 나오는 케이스
-      const dates = extractAllDates(callSec);
-      if (dates.length >= 2) {
-        result.callOptionStartDate = dates[0];
-        result.callOptionEndDate = dates[dates.length - 1];
+      // 2순위: "매매대금 지급기일" 헤더 뒤 날짜 목록
+      const paymentIdx = callSec.search(/매매대금\s*지급\s*기일|지급\s*기일|매매\s*일자/);
+      if (paymentIdx !== -1) {
+        const payWindow = callSec.slice(paymentIdx, paymentIdx + 2000);
+        const dates = extractAllDates(payWindow);
+        if (dates.length >= 1) result.callOptionStartDate = dates[0];
+        if (dates.length >= 2) result.callOptionEndDate = dates[dates.length - 1];
+      } else {
+        // 3순위: 서두 산문에 "N개월이 되는 날 YYYY-MM-DD" 형태
+        const dates = extractAllDates(callSec);
+        if (dates.length >= 2) {
+          result.callOptionStartDate = dates[0];
+          result.callOptionEndDate = dates[dates.length - 1];
+        }
       }
     }
 
     // 콜옵션 비율: "매도청구권 행사 범위 ... 발행가액의 N%"
     const ratioMatch =
-      callSec.match(/행사\s*(?:가능\s*)?범위[^%]{0,200}?([\d.]+)\s*%/) ??
-      callSec.match(/(?:권면총액|발행가액|잔액|원금)[^%]{0,40}?의?\s*([\d.]+)\s*%/) ??
-      callSec.match(/행사\s*가능.{0,50}?([\d.]+)\s*%/);
+      callSec.match(/행사\s*(?:가능\s*)?범위[^%]{0,300}?([\d.]+)\s*%/) ??
+      callSec.match(/(?:권면총액|발행가액|잔액|원금|사채)[^%]{0,60}?의?\s*([\d.]+)\s*%(?:\s*이내|\s*까지|\s*범위)/) ??
+      callSec.match(/행사\s*가능.{0,80}?([\d.]+)\s*%/);
     if (ratioMatch) {
       const n = parseFloat(ratioMatch[1]);
       if (Number.isFinite(n) && n <= 100) result.callOptionRatio = n;
@@ -96,8 +133,9 @@ export function extractPutCall(text: string): PutCallExtraction {
 
     // 콜옵션 금리: "연 N.N%의 이율" — 가장 흔한 표현
     const rateMatch =
+      callSec.match(/(?:매매가액|산식|가산)[^%]{0,200}?연\s*([\d.]+)\s*%\s*의?\s*(?:이율|가산)/) ??
       callSec.match(/연\s*([\d.]+)\s*%\s*의?\s*이율/) ??
-      callSec.match(/이율[^%]{0,50}?([\d.]+)\s*%/) ??
+      callSec.match(/(?:이율|이자율)[^%]{0,50}?연?\s*([\d.]+)\s*%/) ??
       callSec.match(/매매가액[^%]{0,300}?연\s*([\d.]+)\s*%/);
     if (rateMatch) {
       const n = parseFloat(rateMatch[1]);
@@ -113,9 +151,7 @@ export function extractPutCall(text: string): PutCallExtraction {
     // 조기상환은 3개월마다 청구권 발생하는 표가 만기까지 이어지므로 넉넉하게 5000자
     const putSec = text.slice(putIdx, putIdx + 5000);
 
-    // 1순위: 표 행 패턴 "N차 <From date> <To date>" 을 직접 매칭.
-    // 표 뒤에 만기일·이자지급일 등 다른 날짜가 있어도 여기 안 걸림.
-    // 날짜 구분자: - / . 년월일, 공백/문자로 두 날짜 사이 구분 (10-40자)
+    // 1순위: 표 행 패턴 "N차 <From date> <To date>"
     const rowRe = /(?:\d{1,3}|[제])\s*차\D{0,20}(\d{4})[년\-./\s]{1,3}(\d{1,2})[월\-./\s]{1,3}(\d{1,2})[일]?[\s\S]{1,40}?(\d{4})[년\-./\s]{1,3}(\d{1,2})[월\-./\s]{1,3}(\d{1,2})[일]?/g;
     const rows: Array<{ from: string; to: string }> = [];
     let rm: RegExpExecArray | null;
@@ -129,7 +165,7 @@ export function extractPutCall(text: string): PutCallExtraction {
       result.putOptionEndDate = rows[rows.length - 1].to;
       result.putOptionSchedule = JSON.stringify(rows);
     } else {
-      // 2순위 폴백: 표가 없거나 다른 서식일 때 — "조기상환청구기간" 뒤 날짜 목록에서 첫/마지막
+      // 2순위 폴백: 표가 없을 때 "조기상환청구기간" 뒤 날짜 목록에서 첫/마지막
       const periodMatch = putSec.match(/조기상환\s*청구\s*기간[^\d]{0,50}/);
       const scanStart = periodMatch ? periodMatch.index! + periodMatch[0].length : 0;
       const nextSecRel = putSec.slice(scanStart).search(/\d{1,2}\.\s*(?:매도|콜|기타|이자|원금|납입)/);
