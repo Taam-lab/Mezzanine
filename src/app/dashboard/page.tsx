@@ -12,6 +12,9 @@ import {
   Briefcase,
   Bell,
   RefreshCw,
+  Newspaper,
+  FileText,
+  ExternalLink,
 } from "lucide-react";
 import Link from "next/link";
 import { formatKRW, formatPercent, formatDateTime, SEVERITY_LABEL } from "@/lib/utils";
@@ -43,10 +46,26 @@ interface Mover {
   currentConversionPrice: number | null;
 }
 
+interface FeedItem {
+  title: string;
+  url: string;
+  date: string;
+  source?: string;
+}
+
+interface TickerFeed {
+  ticker: string;
+  companyName: string;
+  news: FeedItem[];
+  disclosures: FeedItem[];
+}
+
 export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [feeds, setFeeds] = useState<TickerFeed[]>([]);
+  const [feedsLoading, setFeedsLoading] = useState(false);
 
   async function loadDashboard() {
     setLoading(true);
@@ -93,8 +112,50 @@ export default function DashboardPage() {
         topMovers: movers,
       });
       setLastUpdated(new Date());
+
+      // 뉴스/공시 팔로업: 활성 종목 티커별 병렬 스크래핑 (백그라운드로 병렬)
+      loadFeeds(
+        positions as Array<{
+          underlyingTicker: string;
+          underlyingCompanyName: string;
+          isActive: boolean;
+        }>,
+      );
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadFeeds(
+    positions: Array<{ underlyingTicker: string; underlyingCompanyName: string; isActive: boolean }>,
+  ) {
+    // 기초자산 티커 unique 목록 (활성만) + 종목명 매핑
+    const nameByTicker = new Map<string, string>();
+    for (const p of positions) {
+      if (!p.isActive || !/^\d{6}$/.test(p.underlyingTicker)) continue;
+      if (!nameByTicker.has(p.underlyingTicker)) {
+        nameByTicker.set(p.underlyingTicker, p.underlyingCompanyName);
+      }
+    }
+    const tickers = Array.from(nameByTicker.keys());
+    if (tickers.length === 0) {
+      setFeeds([]);
+      return;
+    }
+    setFeedsLoading(true);
+    try {
+      const res = await fetch(`/api/dashboard/feed?tickers=${tickers.join(",")}`);
+      if (!res.ok) return;
+      const { feeds: raw } = (await res.json()) as {
+        feeds: Array<{ ticker: string; news: FeedItem[]; disclosures: FeedItem[] }>;
+      };
+      const enriched = raw.map((f) => ({
+        ...f,
+        companyName: nameByTicker.get(f.ticker) ?? f.ticker,
+      }));
+      setFeeds(enriched);
+    } finally {
+      setFeedsLoading(false);
     }
   }
 
@@ -290,6 +351,123 @@ export default function DashboardPage() {
             </div>
           </Card>
         </div>
+
+        {/* 기초자산별 뉴스/공시 팔로업 */}
+        {stats && stats.totalPositions > 0 && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Newspaper className="h-4 w-4 text-[#0A2A5E]" />
+                  기초자산 뉴스
+                </CardTitle>
+                {feedsLoading && (
+                  <span className="text-xs text-gray-400">불러오는 중...</span>
+                )}
+              </CardHeader>
+              <div className="divide-y divide-gray-50 max-h-[420px] overflow-y-auto">
+                {feeds.length === 0 && !feedsLoading ? (
+                  <div className="px-5 py-8 text-center text-sm text-gray-400">
+                    뉴스를 불러올 수 없습니다.
+                  </div>
+                ) : (
+                  feeds
+                    .filter((f) => f.news.length > 0)
+                    .map((f) => (
+                      <div key={`news-${f.ticker}`} className="px-5 py-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <p className="text-xs font-semibold text-gray-700">
+                            {f.companyName}{" "}
+                            <span className="text-gray-400 font-normal">({f.ticker})</span>
+                          </p>
+                        </div>
+                        <ul className="space-y-1.5">
+                          {f.news.slice(0, 4).map((n, i) => (
+                            <li key={i} className="flex items-start gap-2 text-xs">
+                              <a
+                                href={n.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex-1 text-gray-700 hover:text-[#0A2A5E] hover:underline line-clamp-1"
+                              >
+                                {n.title}
+                              </a>
+                              <span className="text-gray-400 tabular-nums whitespace-nowrap">
+                                {n.date}
+                              </span>
+                              <ExternalLink className="h-3 w-3 text-gray-300 mt-0.5 flex-shrink-0" />
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ))
+                )}
+                {feeds.length > 0 && feeds.every((f) => f.news.length === 0) && !feedsLoading && (
+                  <div className="px-5 py-8 text-center text-sm text-gray-400">
+                    최근 뉴스가 없습니다.
+                  </div>
+                )}
+              </div>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <FileText className="h-4 w-4 text-[#0A2A5E]" />
+                  기초자산 최근 공시
+                </CardTitle>
+                {feedsLoading && (
+                  <span className="text-xs text-gray-400">불러오는 중...</span>
+                )}
+              </CardHeader>
+              <div className="divide-y divide-gray-50 max-h-[420px] overflow-y-auto">
+                {feeds.length === 0 && !feedsLoading ? (
+                  <div className="px-5 py-8 text-center text-sm text-gray-400">
+                    공시를 불러올 수 없습니다.
+                  </div>
+                ) : (
+                  feeds
+                    .filter((f) => f.disclosures.length > 0)
+                    .map((f) => (
+                      <div key={`disc-${f.ticker}`} className="px-5 py-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <p className="text-xs font-semibold text-gray-700">
+                            {f.companyName}{" "}
+                            <span className="text-gray-400 font-normal">({f.ticker})</span>
+                          </p>
+                        </div>
+                        <ul className="space-y-1.5">
+                          {f.disclosures.slice(0, 4).map((d, i) => (
+                            <li key={i} className="flex items-start gap-2 text-xs">
+                              <a
+                                href={d.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex-1 text-gray-700 hover:text-[#0A2A5E] hover:underline line-clamp-1"
+                              >
+                                {d.title}
+                              </a>
+                              <span className="text-gray-400 tabular-nums whitespace-nowrap">
+                                {d.date}
+                              </span>
+                              <ExternalLink className="h-3 w-3 text-gray-300 mt-0.5 flex-shrink-0" />
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ))
+                )}
+                {feeds.length > 0 &&
+                  feeds.every((f) => f.disclosures.length === 0) &&
+                  !feedsLoading && (
+                    <div className="px-5 py-8 text-center text-sm text-gray-400">
+                      최근 공시가 없습니다.
+                    </div>
+                  )}
+              </div>
+            </Card>
+          </div>
+        )}
 
         {/* 빈 상태 안내 */}
         {stats && stats.totalPositions === 0 && (

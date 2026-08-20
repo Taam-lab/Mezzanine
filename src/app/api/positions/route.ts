@@ -53,6 +53,38 @@ export async function POST(req: NextRequest) {
     const data = parsed.data;
     const userId = await getDefaultUserId();
 
+    // 중복 방지: 같은 기초자산 + 형태 + (회차 또는 채권번호) 조합이 이미 활성 상태로 있으면 거부.
+    // 편집을 신규 등록으로 잘못 눌러 duplicate가 생기는 케이스 방지.
+    if (data.underlyingTicker && data.mezzanineType) {
+      const where: {
+        isActive: true;
+        underlyingTicker: string;
+        mezzanineType: string;
+        seriesNumber?: number;
+        bondCode?: string;
+      } = {
+        isActive: true,
+        underlyingTicker: data.underlyingTicker,
+        mezzanineType: data.mezzanineType,
+      };
+      if (data.seriesNumber) where.seriesNumber = data.seriesNumber;
+      else if (data.bondCode) where.bondCode = data.bondCode;
+
+      const existing = await prisma.position.findFirst({
+        where,
+        select: { id: true, assetName: true },
+      });
+      if (existing) {
+        return NextResponse.json(
+          {
+            error: `이미 등록된 종목입니다: ${existing.assetName}. 수정하시려면 종목 상세 페이지에서 편집을 사용하세요.`,
+            existingPositionId: existing.id,
+          },
+          { status: 409 },
+        );
+      }
+    }
+
     const position = await prisma.position.create({
       data: {
         bondCode: data.bondCode || null,
