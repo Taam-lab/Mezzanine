@@ -1,17 +1,26 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
-import { Plus, TrendingUp, TrendingDown, Search, Trash2 } from "lucide-react";
+import {
+  Plus,
+  TrendingUp,
+  TrendingDown,
+  Search,
+  Trash2,
+  ArrowUp,
+  ArrowDown,
+  ArrowUpDown,
+  Filter,
+} from "lucide-react";
 import {
   formatKRW,
   formatPercent,
   formatDate,
-  MEZZANINE_TYPE_LABEL,
   INVESTMENT_TYPE_LABEL,
 } from "@/lib/utils";
 
@@ -77,6 +86,73 @@ interface LiveQuote {
   changeRate: number;
 }
 
+type SortDir = "asc" | "desc";
+type ColKind = "text" | "enum" | "number" | "date";
+
+interface ColumnDef {
+  key: string;
+  label: string;
+  kind: ColKind;
+  align?: "left" | "center" | "right";
+  enumOptions?: Array<{ value: string; label: string }>;
+  /** 이 컬럼의 filter 값을 갖고 있는 position이 통과하는지 (텍스트) */
+}
+
+const COLUMNS: ColumnDef[] = [
+  { key: "assetName", label: "종목명", kind: "text", align: "left" },
+  { key: "underlyingCompanyName", label: "기초자산", kind: "text", align: "left" },
+  {
+    key: "mezzanineType",
+    label: "형태",
+    kind: "enum",
+    align: "center",
+    enumOptions: [
+      { value: "CB", label: "CB" },
+      { value: "BW", label: "BW" },
+      { value: "EB", label: "EB" },
+      { value: "RCPS", label: "RCPS" },
+    ],
+  },
+  {
+    key: "investmentType",
+    label: "투자구분",
+    kind: "enum",
+    align: "center",
+    enumOptions: [
+      { value: "DIRECT", label: INVESTMENT_TYPE_LABEL.DIRECT ?? "직접" },
+      { value: "INDIRECT", label: INVESTMENT_TYPE_LABEL.INDIRECT ?? "간접" },
+    ],
+  },
+  { key: "investmentAmount", label: "투자금액", kind: "number", align: "right" },
+  { key: "currentPrice", label: "현재가", kind: "number", align: "right" },
+  { key: "changeRate", label: "등락률", kind: "number", align: "right" },
+  { key: "currentConversionPrice", label: "전환/교환가액", kind: "number", align: "right" },
+  { key: "parity", label: "패리티", kind: "number", align: "right" },
+  { key: "issueDate", label: "발행일", kind: "date", align: "center" },
+  { key: "nextPut", label: "다음 Put", kind: "date", align: "center" },
+  { key: "maturityDate", label: "만기일", kind: "date", align: "center" },
+];
+
+interface DerivedRow extends Position {
+  __currentPrice: number | null;
+  __changeRate: number | null;
+  __parity: number | null;
+  __nextPutStart: number | null; // ms epoch, 정렬용
+}
+
+/** 정렬 시 null/undefined는 항상 끝으로 밀리게. */
+function compareValues(a: unknown, b: unknown, dir: SortDir): number {
+  const aNull = a === null || a === undefined || (typeof a === "number" && Number.isNaN(a));
+  const bNull = b === null || b === undefined || (typeof b === "number" && Number.isNaN(b));
+  if (aNull && bNull) return 0;
+  if (aNull) return 1; // null → 끝
+  if (bNull) return -1;
+  let cmp: number;
+  if (typeof a === "number" && typeof b === "number") cmp = a - b;
+  else cmp = String(a).localeCompare(String(b), "ko");
+  return dir === "asc" ? cmp : -cmp;
+}
+
 export default function PositionsPage() {
   const [positions, setPositions] = useState<Position[]>([]);
   const [loading, setLoading] = useState(true);
@@ -85,6 +161,42 @@ export default function PositionsPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [priceError, setPriceError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [sortCol, setSortCol] = useState<string | null>(null);
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
+  // filters: text → 문자열, enum → 선택된 값 배열 (빈배열이면 미필터)
+  const [filters, setFilters] = useState<Record<string, string | string[]>>({});
+  const [openFilter, setOpenFilter] = useState<string | null>(null);
+  const headerRef = useRef<HTMLTableSectionElement>(null);
+
+  // 필터 팝오버 외부 클릭 시 닫기
+  useEffect(() => {
+    if (!openFilter) return;
+    function onDown(e: MouseEvent) {
+      if (!headerRef.current) return;
+      if (!headerRef.current.contains(e.target as Node)) setOpenFilter(null);
+    }
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [openFilter]);
+
+  function toggleSort(col: string) {
+    if (sortCol !== col) {
+      setSortCol(col);
+      setSortDir("asc");
+    } else if (sortDir === "asc") {
+      setSortDir("desc");
+    } else {
+      setSortCol(null);
+    }
+  }
+
+  function clearFilter(col: string) {
+    setFilters((prev) => {
+      const next = { ...prev };
+      delete next[col];
+      return next;
+    });
+  }
 
   async function refreshLivePricesByTickers(tickers: string[]) {
     const uniq = Array.from(new Set(tickers.filter((t) => /^\d{6}$/.test(t))));
@@ -191,12 +303,109 @@ export default function PositionsPage() {
     return () => clearInterval(id);
   }, [positions]);
 
-  const filtered = positions.filter(
-    (p) =>
-      p.assetName.toLowerCase().includes(search.toLowerCase()) ||
-      p.underlyingCompanyName.toLowerCase().includes(search.toLowerCase()) ||
-      p.underlyingTicker.includes(search)
-  );
+  // 각 행에 정렬용 파생값 붙임
+  const derived: DerivedRow[] = useMemo(() => {
+    return positions.map((p) => {
+      const live = livePrices[p.underlyingTicker];
+      const price = live?.price ?? null;
+      const changeRate = live?.changeRate ?? null;
+      const parity =
+        price !== null && p.currentConversionPrice
+          ? (price / p.currentConversionPrice) * 100
+          : null;
+      let nextPutStart: number | null = null;
+      if (p.putOptionSchedule) {
+        try {
+          const rows = JSON.parse(p.putOptionSchedule) as Array<{ from: string; to: string }>;
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          for (const r of rows) {
+            if (today > new Date(r.to)) continue;
+            nextPutStart = new Date(r.from).getTime();
+            break;
+          }
+        } catch {
+          // ignore
+        }
+      }
+      if (nextPutStart === null && p.putOptionStartDate) {
+        nextPutStart = new Date(p.putOptionStartDate).getTime();
+      }
+      return {
+        ...p,
+        __currentPrice: price,
+        __changeRate: changeRate,
+        __parity: parity,
+        __nextPutStart: nextPutStart,
+      };
+    });
+  }, [positions, livePrices]);
+
+  // 필터 적용
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase();
+    return derived.filter((p) => {
+      // 상단 검색어
+      if (q) {
+        const hit =
+          p.assetName.toLowerCase().includes(q) ||
+          p.underlyingCompanyName.toLowerCase().includes(q) ||
+          p.underlyingTicker.includes(search);
+        if (!hit) return false;
+      }
+      // 컬럼 필터
+      for (const [col, f] of Object.entries(filters)) {
+        if (typeof f === "string" && f.trim()) {
+          const term = f.toLowerCase();
+          let target = "";
+          if (col === "assetName") target = p.assetName.toLowerCase();
+          else if (col === "underlyingCompanyName")
+            target = `${p.underlyingCompanyName} ${p.underlyingTicker}`.toLowerCase();
+          if (!target.includes(term)) return false;
+        } else if (Array.isArray(f) && f.length > 0) {
+          const val = (p as unknown as Record<string, string>)[col];
+          if (!f.includes(val)) return false;
+        }
+      }
+      return true;
+    });
+  }, [derived, filters, search]);
+
+  // 정렬 적용
+  const sorted = useMemo(() => {
+    if (!sortCol) return filtered;
+    const getValue = (p: DerivedRow): unknown => {
+      switch (sortCol) {
+        case "assetName":
+          return p.assetName;
+        case "underlyingCompanyName":
+          return p.underlyingCompanyName;
+        case "mezzanineType":
+          return p.mezzanineType;
+        case "investmentType":
+          return p.investmentType;
+        case "investmentAmount":
+          return p.investmentAmount ? Number(p.investmentAmount) : null;
+        case "currentPrice":
+          return p.__currentPrice;
+        case "changeRate":
+          return p.__changeRate;
+        case "currentConversionPrice":
+          return p.currentConversionPrice;
+        case "parity":
+          return p.__parity;
+        case "issueDate":
+          return p.issueDate ? new Date(p.issueDate).getTime() : null;
+        case "nextPut":
+          return p.__nextPutStart;
+        case "maturityDate":
+          return p.maturityDate ? new Date(p.maturityDate).getTime() : null;
+        default:
+          return null;
+      }
+    };
+    return [...filtered].sort((a, b) => compareValues(getValue(a), getValue(b), sortDir));
+  }, [filtered, sortCol, sortDir]);
 
   return (
     <AppLayout>
@@ -244,13 +453,15 @@ export default function PositionsPage() {
 
         {loading ? (
           <div className="text-center py-12 text-sm text-gray-400">불러오는 중...</div>
-        ) : filtered.length === 0 ? (
+        ) : sorted.length === 0 ? (
           <Card className="border-dashed border-2 border-gray-200">
             <div className="text-center py-12">
               <p className="text-gray-500 mb-4">
-                {search ? "검색 결과가 없습니다." : "등록된 종목이 없습니다."}
+                {search || Object.keys(filters).length > 0
+                  ? "검색/필터 결과가 없습니다."
+                  : "등록된 종목이 없습니다."}
               </p>
-              {!search && (
+              {!search && Object.keys(filters).length === 0 && (
                 <Link href="/positions/new">
                   <Button variant="primary">
                     <Plus className="h-4 w-4" />
@@ -264,25 +475,154 @@ export default function PositionsPage() {
           <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead>
+                <thead ref={headerRef}>
                   <tr className="border-b border-gray-100 bg-gray-50">
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">종목명</th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">기초자산</th>
-                    <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">형태</th>
-                    <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">투자구분</th>
-                    <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">투자금액</th>
-                    <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">현재가</th>
-                    <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">등락률</th>
-                    <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">전환/교환가액</th>
-                    <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">패리티</th>
-                    <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">발행일</th>
-                    <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">다음 Put</th>
-                    <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">만기일</th>
+                    {COLUMNS.map((col) => {
+                      const filterActive =
+                        (typeof filters[col.key] === "string" &&
+                          (filters[col.key] as string).trim().length > 0) ||
+                        (Array.isArray(filters[col.key]) &&
+                          (filters[col.key] as string[]).length > 0);
+                      const isSorted = sortCol === col.key;
+                      const alignClass =
+                        col.align === "right"
+                          ? "justify-end"
+                          : col.align === "center"
+                            ? "justify-center"
+                            : "justify-start";
+                      const canFilter = col.kind === "text" || col.kind === "enum";
+                      return (
+                        <th
+                          key={col.key}
+                          className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide relative whitespace-nowrap"
+                        >
+                          <div className={`flex items-center gap-1 ${alignClass}`}>
+                            <button
+                              type="button"
+                              onClick={() => toggleSort(col.key)}
+                              className="flex items-center gap-1 hover:text-[#0A2A5E]"
+                              title="클릭하여 정렬"
+                            >
+                              <span>{col.label}</span>
+                              {isSorted ? (
+                                sortDir === "asc" ? (
+                                  <ArrowUp className="h-3 w-3 text-[#0A2A5E]" />
+                                ) : (
+                                  <ArrowDown className="h-3 w-3 text-[#0A2A5E]" />
+                                )
+                              ) : (
+                                <ArrowUpDown className="h-3 w-3 text-gray-300" />
+                              )}
+                            </button>
+                            {canFilter && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setOpenFilter(openFilter === col.key ? null : col.key)
+                                }
+                                className={`p-0.5 rounded hover:bg-gray-200 ${
+                                  filterActive ? "text-[#0A2A5E]" : "text-gray-300"
+                                }`}
+                                title="필터"
+                              >
+                                <Filter className="h-3 w-3" />
+                              </button>
+                            )}
+                          </div>
+
+                          {openFilter === col.key && canFilter && (
+                            <div className="absolute top-full mt-1 left-0 z-40 min-w-[180px] bg-white border border-gray-200 rounded-lg shadow-lg p-3 normal-case font-normal">
+                              {col.kind === "text" ? (
+                                <div className="space-y-2">
+                                  <input
+                                    type="text"
+                                    autoFocus
+                                    value={(filters[col.key] as string) ?? ""}
+                                    onChange={(e) =>
+                                      setFilters((prev) => ({
+                                        ...prev,
+                                        [col.key]: e.target.value,
+                                      }))
+                                    }
+                                    placeholder="포함할 텍스트..."
+                                    className="w-full px-2 py-1.5 text-xs border border-gray-200 rounded focus:outline-none focus:border-[#0A2A5E]"
+                                  />
+                                  <div className="flex justify-between gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => clearFilter(col.key)}
+                                      className="text-xs text-gray-500 hover:text-gray-700"
+                                    >
+                                      필터 해제
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setOpenFilter(null)}
+                                      className="text-xs text-[#0A2A5E] font-medium"
+                                    >
+                                      닫기
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="space-y-1.5">
+                                  {col.enumOptions!.map((opt) => {
+                                    const arr = (filters[col.key] as string[]) ?? [];
+                                    const checked = arr.includes(opt.value);
+                                    return (
+                                      <label
+                                        key={opt.value}
+                                        className="flex items-center gap-2 text-xs cursor-pointer hover:bg-gray-50 px-1 py-0.5 rounded"
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          checked={checked}
+                                          onChange={(e) => {
+                                            setFilters((prev) => {
+                                              const cur = (prev[col.key] as string[]) ?? [];
+                                              const next = e.target.checked
+                                                ? [...cur, opt.value]
+                                                : cur.filter((v) => v !== opt.value);
+                                              const clone = { ...prev };
+                                              if (next.length === 0) delete clone[col.key];
+                                              else clone[col.key] = next;
+                                              return clone;
+                                            });
+                                          }}
+                                          className="rounded accent-[#0A2A5E]"
+                                        />
+                                        <span>{opt.label}</span>
+                                      </label>
+                                    );
+                                  })}
+                                  <div className="flex justify-between gap-2 pt-2 border-t border-gray-100">
+                                    <button
+                                      type="button"
+                                      onClick={() => clearFilter(col.key)}
+                                      className="text-xs text-gray-500 hover:text-gray-700"
+                                    >
+                                      필터 해제
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setOpenFilter(null)}
+                                      className="text-xs text-[#0A2A5E] font-medium"
+                                    >
+                                      닫기
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </th>
+                      );
+                    })}
                     <th className="px-2 py-3"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  {filtered.map((pos) => {
+                  {sorted.map((pos) => {
                     const live = livePrices[pos.underlyingTicker];
                     const price = live?.price;
                     const changeRate = live?.changeRate ?? 0;
