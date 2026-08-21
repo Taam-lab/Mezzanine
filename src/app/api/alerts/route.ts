@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getDefaultUserId } from "@/lib/defaultUser";
+import { sendTelegramAlert } from "@/lib/telegram";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -99,6 +100,16 @@ export async function POST(req: NextRequest) {
         },
       });
       created++;
+
+      // 텔레그램 발송 (CRITICAL/WARNING 만). 실패는 무시 — 알림 저장이 롤백되면 안 됨.
+      if (a.severity === "CRITICAL" || a.severity === "WARNING") {
+        sendTelegramAlert({
+          title: a.title,
+          body: a.body ?? null,
+          severity: a.severity,
+          sourceUrl: a.sourceUrl ?? null,
+        }).catch(() => {});
+      }
     }
 
     return NextResponse.json({ created });

@@ -51,12 +51,12 @@ const SERVICE_CONFIG: Record<
   },
   telegram: {
     label: "텔레그램 봇",
-    description: "텔레그램 알림 (Phase 2)",
+    description: "긴급·중요 알림을 텔레그램으로 발송",
     fields: [
       { key: "bot_token", label: "Bot Token", placeholder: "텔레그램 Bot Token" },
       { key: "chat_id", label: "Chat ID", placeholder: "텔레그램 Chat ID" },
     ],
-    fallbackDesc: "미등록 시 웹 푸시 알림만 사용",
+    fallbackDesc: "미등록 시 웹 대시보드에서만 알림 확인",
   },
 };
 
@@ -206,7 +206,31 @@ export default function AdminIntegrationsPage() {
                   ))}
                 </div>
 
-                <div className="flex justify-end pt-1">
+                <div className="flex justify-end gap-2 pt-1">
+                  {serviceName === "telegram" && isRegistered && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={async () => {
+                        const res = await fetch("/api/admin/integrations", {
+                          method: "PUT",
+                          headers: {
+                            "Content-Type": "application/json",
+                            "x-admin-password": getAdminPwd(),
+                          },
+                          body: JSON.stringify({
+                            serviceName: "telegram",
+                            action: "test",
+                          }),
+                        });
+                        const data = await res.json().catch(() => ({}));
+                        if (res.ok) alert("텔레그램 테스트 메시지 발송됨. 확인해보세요.");
+                        else alert(`발송 실패: ${data.error ?? res.status}`);
+                      }}
+                    >
+                      테스트 발송
+                    </Button>
+                  )}
                   <Button
                     size="sm"
                     variant="primary"
