@@ -113,11 +113,50 @@ export default function DashboardPage() {
       }
     }
 
-    setLoading((prev) => prev && true); // 캐시가 있으면 이미 false, 없으면 true 유지
+    setLoading((prev) => prev && true);
     setFeedsLoading(true);
     try {
-      const posRes = await fetch("/api/positions", { cache: "no-store" });
-      const positions = (await posRes.json()) as PositionSlim[];
+      // 통합 init: positions + alerts + Naver 시세를 서버에서 병렬로 처리.
+      // 클라이언트 왕복 3번 → 1번, lambda 콜드스타트 3번 → 1번.
+      // 힌트 티커(sessionStorage 캐시)를 넘기면 서버가 positions/alerts 조회와 시세 조회를 진짜 병렬로 실행.
+      const hintedRaw =
+        typeof window !== "undefined"
+          ? sessionStorage.getItem("positionTickers")
+          : null;
+      let hintedTickerList: string[] = [];
+      try {
+        hintedTickerList = hintedRaw ? (JSON.parse(hintedRaw) as string[]) : [];
+      } catch {
+        hintedTickerList = [];
+      }
+      const tickerHint =
+        hintedTickerList.length > 0 ? `&tickers=${hintedTickerList.join(",")}` : "";
+
+      // 힌트 티커+회사명 캐시가 있으면 feed도 init과 동시에 시작 → 전체 wall clock 단축
+      const hintedNameEntriesRaw =
+        typeof window !== "undefined"
+          ? sessionStorage.getItem("positionTickerNames")
+          : null;
+      const preFeedPromise =
+        hintedNameEntriesRaw && !forceRefresh
+          ? fetch(`/api/dashboard/feed?tickers=${hintedNameEntriesRaw}&t=${Date.now()}`, {
+              cache: "no-store",
+            })
+              .then((r) => r.json())
+              .catch(() => null)
+          : Promise.resolve(null);
+
+      const initRes = await fetch(`/api/dashboard/init?t=${Date.now()}${tickerHint}`, {
+        cache: "no-store",
+      });
+      const init = (await initRes.json()) as {
+        positions: PositionSlim[];
+        alerts: DbAlertItem[];
+        quotes: Record<string, { price?: number; changeRate?: number }>;
+        tickers: string[];
+      };
+      const positions = init.positions;
+      const quotes = init.quotes ?? {};
 
       const tickerNameMap = new Map<string, string>();
       for (const p of positions) {
@@ -131,27 +170,21 @@ export default function DashboardPage() {
         .map(([t, n]) => `${t}:${encodeURIComponent(n)}`)
         .join(",");
 
+      // 티커 & 티커:이름 캐시 저장 (다음 로드시 init/feed 힌트로 활용)
+      if (tickers.length > 0 && typeof window !== "undefined") {
+        try {
+          sessionStorage.setItem("positionTickers", JSON.stringify(tickers));
+          sessionStorage.setItem("positionTickerNames", tickerNameEntries);
+        } catch {
+          // ignore
+        }
+      }
+
       setStats({ totalPositions: positions.length, topMovers: [] });
       setLastUpdated(new Date());
       setLoading(false);
 
-      // Step 2: 시세 + DB 알림 (병렬) — save=false로 DB 쓰기 스킵해 응답 시간 절반
-      // cache: "no-store" + 캐시버스팅 파라미터: 새로고침 버튼 누를 때마다 브라우저·프록시 캐시 무시하고 새로 조회
-      const pricesPromise = tickers.length
-        ? fetch(`/api/prices?tickers=${tickers.join(",")}&save=false&t=${Date.now()}`, {
-            cache: "no-store",
-          })
-            .then((r) => r.json())
-            .catch(() => ({ quotes: {} }))
-        : Promise.resolve({ quotes: {} });
-      const dbAlertPromise = fetch("/api/alerts?limit=20")
-        .then((r) => r.json())
-        .catch(() => []);
-
-      const [priceRes, dbAlertRes] = await Promise.all([pricesPromise, dbAlertPromise]);
-      const quotes =
-        (priceRes as { quotes: Record<string, { price?: number; changeRate?: number }> })
-          .quotes ?? {};
+      const dbAlertRes = init.alerts;
 
       const movers: Mover[] = positions
         .filter((p) => p.isActive)
@@ -237,14 +270,26 @@ export default function DashboardPage() {
         }).catch(() => {});
       }
 
-      // Step 3: 뉴스/공시 (백그라운드, 완료되면 알림에 병합)
+      // Step 3: 뉴스/공시 — 힌트로 이미 시작한 preFeedPromise 재사용, 없으면 지금 시작
       if (tickers.length === 0) {
         setFeedsLoading(false);
         return;
       }
-      fetch(`/api/dashboard/feed?tickers=${tickerNameEntries}`)
-        .then((r) => r.json())
+      const preFeed = await preFeedPromise;
+      const feedPromise: Promise<unknown> = preFeed
+        ? Promise.resolve(preFeed)
+        : fetch(`/api/dashboard/feed?tickers=${tickerNameEntries}&t=${Date.now()}`, {
+            cache: "no-store",
+          })
+            .then((r) => r.json())
+            .catch(() => null);
+
+      feedPromise
         .then((feedRes) => {
+          if (!feedRes) {
+            setFeedsLoading(false);
+            return;
+          }
           const feedData = feedRes as {
             news: FeedItem[];
             disclosures: FeedItem[];
