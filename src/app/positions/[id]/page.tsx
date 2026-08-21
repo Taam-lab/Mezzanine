@@ -183,15 +183,29 @@ export default function PositionDetailPage() {
   }
 
   useEffect(() => {
-    // 종목 상세 로드 전에 캐시된 티커로 시세 호출을 병렬 선행
-    const cacheKey = `positionTicker:${params.id}`;
+    // sessionStorage에 종목 스냅샷 있으면 즉시 hydrate → 로딩 스피너 없이 화면 표시.
+    // 티커 캐시로 시세도 병렬 선행.
+    const detailKey = `positionDetail:${params.id}`;
+    const tickerKey = `positionTicker:${params.id}`;
+    if (typeof window !== "undefined") {
+      const cachedDetail = sessionStorage.getItem(detailKey);
+      if (cachedDetail) {
+        try {
+          const parsed = JSON.parse(cachedDetail);
+          setPosition(parsed);
+          setLoading(false);
+        } catch {
+          // ignore
+        }
+      }
+    }
     const cachedTicker =
-      typeof window !== "undefined" ? sessionStorage.getItem(cacheKey) : null;
+      typeof window !== "undefined" ? sessionStorage.getItem(tickerKey) : null;
     if (cachedTicker && /^\d{6}$/.test(cachedTicker)) {
       refreshPrice(cachedTicker);
     }
 
-    fetch(`/api/positions/${params.id}`)
+    fetch(`/api/positions/${params.id}`, { cache: "no-store" })
       .then((r) => {
         if (!r.ok) router.push("/positions");
         return r.json();
@@ -199,9 +213,13 @@ export default function PositionDetailPage() {
       .then((data) => {
         setPosition(data);
         setLoading(false);
+        try {
+          sessionStorage.setItem(detailKey, JSON.stringify(data));
+        } catch {
+          // storage full 등 무시
+        }
         if (data?.underlyingTicker) {
-          sessionStorage.setItem(cacheKey, data.underlyingTicker);
-          // 캐시로 이미 조회했으면 재호출 생략 (60s interval이 곧 갱신함)
+          sessionStorage.setItem(tickerKey, data.underlyingTicker);
           if (data.underlyingTicker !== cachedTicker) refreshPrice(data.underlyingTicker);
         }
       });

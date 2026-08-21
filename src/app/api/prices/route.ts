@@ -30,8 +30,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "한 번에 최대 100개까지 조회 가능합니다." }, { status: 400 });
   }
 
-  // 네이버는 병렬 요청에 관대하지만, 안전하게 8개씩 배치로 나눠 던짐
-  const CHUNK = 8;
+  // 네이버는 병렬 요청에 관대함. 15개 이하는 한 번에 다 던져도 문제없음.
+  const CHUNK = 15;
   const results: Array<NaverQuote | { ticker: string; error: string }> = [];
   for (let i = 0; i < tickers.length; i += CHUNK) {
     const chunk = tickers.slice(i, i + CHUNK);

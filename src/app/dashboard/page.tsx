@@ -81,16 +81,42 @@ export default function DashboardPage() {
   const [feedsLoading, setFeedsLoading] = useState(false);
   const [alertList, setAlertList] = useState<UiAlert[]>([]);
 
-  // 대시보드 로드 = 3단계로 나누어 각 단계가 화면에 즉시 반영되게.
-  //   1) positions (빠름, ms 수준) → 상단 요약카드/스켈레톤 뜸
-  //   2) prices + DB alerts (병렬, 1-2초) → 시세/알림 채워짐
-  //   3) 뉴스/공시 feed (Google News + Naver 스크래핑, 2-4초) → 하단 카드 채워짐
-  // 이전엔 Promise.all로 전부 기다렸기 때문에 가장 느린 것 하나 때문에 화면 전체가 멈춰있었음.
-  async function loadDashboard() {
-    setLoading(true);
+  // 대시보드 로드 전략:
+  //   0) sessionStorage 캐시가 있으면 즉시 렌더 (0ms 체감) → 뒤에서 refresh
+  //   1) positions (수백 ms) → 요약 타일 즉시
+  //   2) prices + DB alerts 병렬 → 시세/알림
+  //   3) 뉴스/공시 feed (백그라운드) → 하단 카드 + 공시 알림 병합 + DB 저장
+  async function loadDashboard(opts?: { forceRefresh?: boolean }) {
+    const forceRefresh = opts?.forceRefresh ?? false;
+
+    // Step 0: 캐시 hydrate (강제 새로고침이 아닐 때만)
+    if (!forceRefresh && typeof window !== "undefined") {
+      const cached = sessionStorage.getItem("dashboardCache");
+      if (cached) {
+        try {
+          const c = JSON.parse(cached) as {
+            stats?: DashboardStats;
+            news?: FeedItem[];
+            disclosures?: FeedItem[];
+            alertList?: UiAlert[];
+            ts?: number;
+          };
+          if (c.stats) setStats(c.stats);
+          if (c.news) setNews(c.news);
+          if (c.disclosures) setDisclosures(c.disclosures);
+          if (c.alertList) setAlertList(c.alertList);
+          if (c.ts) setLastUpdated(new Date(c.ts));
+          setLoading(false); // 캐시로 요약 표시
+        } catch {
+          // ignore
+        }
+      }
+    }
+
+    setLoading((prev) => prev && true); // 캐시가 있으면 이미 false, 없으면 true 유지
     setFeedsLoading(true);
     try {
-      const posRes = await fetch("/api/positions");
+      const posRes = await fetch("/api/positions", { cache: "no-store" });
       const positions = (await posRes.json()) as PositionSlim[];
 
       const tickerNameMap = new Map<string, string>();
@@ -193,6 +219,24 @@ export default function DashboardPage() {
         ),
       );
 
+      // 가격 알림 DB 저장 (POST /api/alerts, dedup 60분 윈도우)
+      if (priceAlerts.length > 0) {
+        const posByTicker = new Map(positions.map((p) => [p.underlyingTicker, p.id]));
+        fetch("/api/alerts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            alerts: priceAlerts.map((a) => ({
+              positionId: a.ticker ? posByTicker.get(a.ticker) ?? null : null,
+              alertType: "PRICE_MOVE",
+              severity: a.severity,
+              title: a.title,
+              dedupWithinMinutes: 60,
+            })),
+          }),
+        }).catch(() => {});
+      }
+
       // Step 3: 뉴스/공시 (백그라운드, 완료되면 알림에 병합)
       if (tickers.length === 0) {
         setFeedsLoading(false);
@@ -224,11 +268,44 @@ export default function DashboardPage() {
           }));
           setNews(feedData.news ?? []);
           setDisclosures(feedData.disclosures ?? []);
-          setAlertList((prev) =>
-            [...prev, ...disclosureAlerts].sort((a, b) =>
-              a.isoDate < b.isoDate ? 1 : a.isoDate > b.isoDate ? -1 : 0,
-            ),
+          const mergedAlerts = [...priceAlerts, ...dbAlerts, ...disclosureAlerts].sort(
+            (a, b) => (a.isoDate < b.isoDate ? 1 : a.isoDate > b.isoDate ? -1 : 0),
           );
+          setAlertList(mergedAlerts);
+
+          // 세션 캐시 저장 (다음 진입시 즉시 렌더)
+          try {
+            sessionStorage.setItem(
+              "dashboardCache",
+              JSON.stringify({
+                stats: { totalPositions: positions.length, topMovers: movers },
+                news: feedData.news ?? [],
+                disclosures: feedData.disclosures ?? [],
+                alertList: mergedAlerts,
+                ts: Date.now(),
+              }),
+            );
+          } catch {
+            // storage full 등 무시
+          }
+
+          // 공시 알림 DB 저장 (sourceUrl 기반 dedup — 같은 rcpNo는 한 번만 저장됨)
+          if (disclosureAlerts.length > 0) {
+            const posByTicker = new Map(positions.map((p) => [p.underlyingTicker, p.id]));
+            fetch("/api/alerts", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                alerts: disclosureAlerts.map((a) => ({
+                  positionId: a.ticker ? posByTicker.get(a.ticker) ?? null : null,
+                  alertType: "DISCLOSURE",
+                  severity: a.severity,
+                  title: a.title,
+                  sourceUrl: a.url,
+                })),
+              }),
+            }).catch(() => {});
+          }
         })
         .catch(() => {})
         .finally(() => setFeedsLoading(false));
@@ -270,7 +347,7 @@ export default function DashboardPage() {
             )}
           </div>
           <button
-            onClick={loadDashboard}
+            onClick={() => loadDashboard({ forceRefresh: true })}
             disabled={loading}
             className="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50"
           >

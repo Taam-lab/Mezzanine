@@ -146,29 +146,37 @@ export default function PositionsPage() {
   }
 
   useEffect(() => {
-    // 재방문 시 즉시 시세 조회를 시작하기 위한 티커 캐시
-    const cached =
-      typeof window !== "undefined" ? sessionStorage.getItem("positionTickers") : null;
-    if (cached) {
-      try {
-        const tickers = JSON.parse(cached) as string[];
-        if (Array.isArray(tickers) && tickers.length > 0) {
-          refreshLivePricesByTickers(tickers);
+    // 재방문 시 이전 목록 스냅샷을 sessionStorage에서 즉시 hydrate → 화면 바로 뜸
+    // 티커 캐시로 시세 조회도 병렬 시작.
+    if (typeof window !== "undefined") {
+      const cachedList = sessionStorage.getItem("positionsList");
+      if (cachedList) {
+        try {
+          const list = JSON.parse(cachedList) as Position[];
+          if (Array.isArray(list) && list.length > 0) {
+            setPositions(list);
+            setLoading(false);
+            refreshLivePricesByTickers(list.map((p) => p.underlyingTicker));
+          }
+        } catch {
+          // ignore
         }
-      } catch {
-        // ignore corrupt cache
       }
     }
 
-    fetch("/api/positions")
+    fetch("/api/positions", { cache: "no-store" })
       .then((r) => r.json())
       .then((data) => {
         const list = Array.isArray(data) ? data : [];
         setPositions(list);
         setLoading(false);
+        try {
+          sessionStorage.setItem("positionsList", JSON.stringify(list));
+        } catch {
+          // storage full 등 무시
+        }
         const tickers = list.map((p: Position) => p.underlyingTicker);
         if (tickers.length > 0) {
-          sessionStorage.setItem("positionTickers", JSON.stringify(tickers));
           refreshLivePricesByTickers(tickers);
         }
       });
