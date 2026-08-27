@@ -354,6 +354,12 @@ export default function DashboardPage() {
         })
         .catch(() => {})
         .finally(() => setFeedsLoading(false));
+
+      // 전환가액 조정 공시 스캔 (백그라운드 fire-and-forget).
+      // 회차 매칭되면 currentConversionPrice 자동 업데이트 + 이력 기록 + CRITICAL 알림.
+      fetch(`/api/dashboard/process-adjustments?t=${Date.now()}`, {
+        cache: "no-store",
+      }).catch(() => {});
     } catch {
       setLoading(false);
       setFeedsLoading(false);
