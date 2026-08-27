@@ -152,12 +152,20 @@ export function extractPutCall(text: string): PutCallExtraction {
     const putSec = text.slice(putIdx, putIdx + 5000);
 
     // 1순위: 표 행 패턴 "N차 <From date> <To date>"
-    const rowRe = /(?:\d{1,3}|[제])\s*차\D{0,20}(\d{4})[년\-./\s]{1,3}(\d{1,2})[월\-./\s]{1,3}(\d{1,2})[일]?[\s\S]{1,40}?(\d{4})[년\-./\s]{1,3}(\d{1,2})[월\-./\s]{1,3}(\d{1,2})[일]?/g;
+    //   회차 표기: 1차 / 10차 / 100차 / 제1회 / 제N차 / N회차 등 다양한 변형 커버.
+    const rowRe = /(?:제\s*)?(?:\d{1,3})\s*(?:차|회차|회)\D{0,20}(\d{4})[년\-./\s]{1,3}(\d{1,2})[월\-./\s]{1,3}(\d{1,2})[일]?[\s\S]{1,40}?(\d{4})[년\-./\s]{1,3}(\d{1,2})[월\-./\s]{1,3}(\d{1,2})[일]?/g;
     const rows: Array<{ from: string; to: string }> = [];
     let rm: RegExpExecArray | null;
     while ((rm = rowRe.exec(putSec)) !== null) {
       const from = normalizeDate(rm[1], rm[2], rm[3]);
       const to = normalizeDate(rm[4], rm[5], rm[6]);
+      // 풋옵션 행사기간은 통상 ≤30일. 45일 초과 → 근처 이자지급 표(3개월 짜리)를
+      // 잘못 매칭한 것이므로 폐기. 또한 뒤집힌 값(from>to)이나 to-from > 1년도 제외.
+      const fromMs = new Date(from).getTime();
+      const toMs = new Date(to).getTime();
+      if (!Number.isFinite(fromMs) || !Number.isFinite(toMs)) continue;
+      const days = Math.round((toMs - fromMs) / (1000 * 60 * 60 * 24));
+      if (days < 0 || days > 45) continue;
       rows.push({ from, to });
     }
     if (rows.length > 0) {

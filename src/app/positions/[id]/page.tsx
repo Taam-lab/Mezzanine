@@ -160,6 +160,28 @@ export default function PositionDetailPage() {
   const [loading, setLoading] = useState(true);
   const [livePrice, setLivePrice] = useState<LivePrice | null>(null);
   const [refreshingPrice, setRefreshingPrice] = useState(false);
+  const [reparsing, setReparsing] = useState(false);
+
+  async function reparseDisclosure(id: string) {
+    if (!confirm("저장된 원문 URL로 풋/콜 옵션 필드를 재파싱합니다. 계속?")) return;
+    setReparsing(true);
+    try {
+      const res = await fetch(`/api/positions/${id}/reparse`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(`재파싱 실패: ${data.error ?? res.status}`);
+        return;
+      }
+      alert(`재파싱 완료. 스케줄 회차 ${data.scheduleRows}건. 새로고침합니다.`);
+      // sessionStorage detail 캐시 무효화 후 리로드
+      sessionStorage.removeItem(`positionDetail:${id}`);
+      window.location.reload();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "네트워크 오류");
+    } finally {
+      setReparsing(false);
+    }
+  }
 
   const ticker = position?.underlyingTicker;
 
@@ -499,7 +521,7 @@ export default function PositionDetailPage() {
                   </section>
                 ))}
                 {position.sourceDisclosureUrl && (
-                  <div className="mt-4 pt-4 border-t border-gray-100">
+                  <div className="mt-4 pt-4 border-t border-gray-100 flex items-center justify-between">
                     <a
                       href={position.sourceDisclosureUrl}
                       target="_blank"
@@ -509,6 +531,14 @@ export default function PositionDetailPage() {
                       <ExternalLink className="h-3 w-3" />
                       DART 공시 원문 보기
                     </a>
+                    <button
+                      onClick={() => reparseDisclosure(position.id)}
+                      disabled={reparsing}
+                      className="text-xs text-gray-500 hover:text-[#0A2A5E] disabled:opacity-50"
+                      title="파서 개선 후 저장된 원문으로 풋/콜 옵션 필드만 다시 파싱"
+                    >
+                      {reparsing ? "재파싱 중..." : "공시 재파싱 (풋/콜)"}
+                    </button>
                   </div>
                 )}
               </CardContent>
