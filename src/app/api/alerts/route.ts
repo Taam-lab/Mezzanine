@@ -155,6 +155,36 @@ export async function POST(req: NextRequest) {
   }
 }
 
+/**
+ * DELETE /api/alerts?id=xxx   → 단일 삭제
+ * DELETE /api/alerts?all=true → 사용자 표시 알림 전체 삭제 (Alert + AlertUserStatus)
+ */
+export async function DELETE(req: NextRequest) {
+  const { searchParams } = new URL(req.url);
+  const id = searchParams.get("id");
+  const all = searchParams.get("all") === "true";
+  try {
+    if (all) {
+      await prisma.$transaction([
+        prisma.alertUserStatus.deleteMany({}),
+        prisma.alert.deleteMany({}),
+      ]);
+      return NextResponse.json({ ok: true, mode: "all" });
+    }
+    if (!id) {
+      return NextResponse.json({ error: "id 또는 all=true 필요" }, { status: 400 });
+    }
+    await prisma.$transaction([
+      prisma.alertUserStatus.deleteMany({ where: { alertId: id } }),
+      prisma.alert.delete({ where: { id } }),
+    ]);
+    return NextResponse.json({ ok: true, mode: "single" });
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ error: detail.slice(0, 300) }, { status: 500 });
+  }
+}
+
 export async function PATCH(req: NextRequest) {
   const userId = await getDefaultUserId();
   const body = await req.json();

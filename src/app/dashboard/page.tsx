@@ -15,13 +15,16 @@ import {
   Newspaper,
   FileText,
   ExternalLink,
+  X,
+  Clock,
 } from "lucide-react";
 import Link from "next/link";
-import { formatPercent, formatDateTime, SEVERITY_LABEL } from "@/lib/utils";
+import { formatPercent, formatDateTime, formatKRWShort, SEVERITY_LABEL } from "@/lib/utils";
 
 interface DashboardStats {
   totalPositions: number;
-  topMovers: Mover[];
+  topRisers: Mover[];
+  topFallers: Mover[];
 }
 
 interface DbAlertItem {
@@ -55,6 +58,7 @@ interface FeedItem {
 }
 
 interface UiAlert {
+  id?: string; // DB 알림만 있음 — 삭제 대상
   severity: "CRITICAL" | "WARNING" | "INFO";
   title: string;
   url?: string;
@@ -70,7 +74,37 @@ interface PositionSlim {
   underlyingTicker: string;
   underlyingCompanyName: string;
   currentConversionPrice: number | null;
+  investmentAmount: string | null;
+  putOptionStartDate: string | null;
+  putOptionEndDate: string | null;
+  putOptionSchedule: string | null;
   isActive: boolean;
+}
+
+/** 오늘 날짜 기준 이 종목이 풋옵션 행사 가능 구간에 있으면 range 반환. */
+function currentPutWindow(p: PositionSlim): { from: string; to: string } | null {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  if (p.putOptionSchedule) {
+    try {
+      const rows = JSON.parse(p.putOptionSchedule) as Array<{ from: string; to: string }>;
+      for (const r of rows) {
+        const from = new Date(r.from);
+        const to = new Date(r.to);
+        if (today >= from && today <= to) return r;
+      }
+    } catch {
+      // ignore
+    }
+  }
+  if (p.putOptionStartDate && p.putOptionEndDate) {
+    const from = new Date(p.putOptionStartDate);
+    const to = new Date(p.putOptionEndDate);
+    if (today >= from && today <= to) {
+      return { from: p.putOptionStartDate, to: p.putOptionEndDate };
+    }
+  }
+  return null;
 }
 
 export default function DashboardPage() {
@@ -81,6 +115,28 @@ export default function DashboardPage() {
   const [disclosures, setDisclosures] = useState<FeedItem[]>([]);
   const [feedsLoading, setFeedsLoading] = useState(false);
   const [alertList, setAlertList] = useState<UiAlert[]>([]);
+  const [positions, setPositions] = useState<PositionSlim[]>([]);
+
+  async function deleteAlert(alertId: string) {
+    try {
+      const res = await fetch(`/api/alerts?id=${alertId}`, { method: "DELETE" });
+      if (!res.ok) return;
+      setAlertList((prev) => prev.filter((a) => a.id !== alertId));
+    } catch {
+      // ignore
+    }
+  }
+
+  async function clearAllAlerts() {
+    if (!confirm("모든 알림을 삭제하시겠습니까?")) return;
+    try {
+      const res = await fetch("/api/alerts?all=true", { method: "DELETE" });
+      if (!res.ok) return;
+      setAlertList([]);
+    } catch {
+      // ignore
+    }
+  }
 
   // 대시보드 로드 전략:
   //   0) sessionStorage 캐시가 있으면 즉시 렌더 (0ms 체감) → 뒤에서 refresh
@@ -97,12 +153,14 @@ export default function DashboardPage() {
         try {
           const c = JSON.parse(cached) as {
             stats?: DashboardStats;
+            positions?: PositionSlim[];
             news?: FeedItem[];
             disclosures?: FeedItem[];
             alertList?: UiAlert[];
             ts?: number;
           };
           if (c.stats) setStats(c.stats);
+          if (c.positions) setPositions(c.positions);
           if (c.news) setNews(c.news);
           if (c.disclosures) setDisclosures(c.disclosures);
           if (c.alertList) setAlertList(c.alertList);
@@ -181,13 +239,15 @@ export default function DashboardPage() {
         }
       }
 
-      setStats({ totalPositions: positions.length, topMovers: [] });
+      setPositions(positions);
+      setStats({ totalPositions: positions.length, topRisers: [], topFallers: [] });
       setLastUpdated(new Date());
       setLoading(false);
 
       const dbAlertRes = init.alerts;
 
-      const movers: Mover[] = positions
+      // 활성 종목 + 시세 join
+      const withQuotes: Mover[] = positions
         .filter((p) => p.isActive)
         .map((p) => {
           const q = quotes[p.underlyingTicker];
@@ -200,8 +260,16 @@ export default function DashboardPage() {
             currentPrice: q?.price ?? null,
             currentConversionPrice: p.currentConversionPrice,
           };
-        })
-        .sort((a, b) => Math.abs(b.changeRate ?? 0) - Math.abs(a.changeRate ?? 0))
+        });
+
+      // 상승 상위 5, 하락 상위 5
+      const topRisers = withQuotes
+        .filter((m) => (m.changeRate ?? 0) > 0)
+        .sort((a, b) => (b.changeRate ?? 0) - (a.changeRate ?? 0))
+        .slice(0, 5);
+      const topFallers = withQuotes
+        .filter((m) => (m.changeRate ?? 0) < 0)
+        .sort((a, b) => (a.changeRate ?? 0) - (b.changeRate ?? 0))
         .slice(0, 5);
 
       const priceAlerts: UiAlert[] = [];
@@ -249,6 +317,7 @@ export default function DashboardPage() {
         }
         const displayIso = eventAt ?? a.createdAt;
         return {
+          id: a.id,
           severity: (["CRITICAL", "WARNING", "INFO"].includes(a.severity)
             ? a.severity
             : "INFO") as "CRITICAL" | "WARNING" | "INFO",
@@ -260,7 +329,7 @@ export default function DashboardPage() {
         };
       });
 
-      setStats({ totalPositions: positions.length, topMovers: movers });
+      setStats({ totalPositions: positions.length, topRisers, topFallers });
       setAlertList(
         [...priceAlerts, ...dbAlerts].sort((a, b) =>
           a.isoDate < b.isoDate ? 1 : a.isoDate > b.isoDate ? -1 : 0,
@@ -338,7 +407,8 @@ export default function DashboardPage() {
             sessionStorage.setItem(
               "dashboardCache",
               JSON.stringify({
-                stats: { totalPositions: positions.length, topMovers: movers },
+                stats: { totalPositions: positions.length, topRisers, topFallers },
+                positions,
                 news: feedData.news ?? [],
                 disclosures: feedData.disclosures ?? [],
                 alertList: mergedAlerts,
@@ -483,14 +553,79 @@ export default function DashboardPage() {
           </Card>
         </div>
 
+        {/* 풋옵션 행사 가능 종목 — 최근알림/변동TOP 위, 가로 전체 폭 */}
+        {(() => {
+          const exercisable = positions
+            .filter((p) => p.isActive)
+            .map((p) => ({ pos: p, win: currentPutWindow(p) }))
+            .filter((r) => r.win !== null) as Array<{
+            pos: PositionSlim;
+            win: { from: string; to: string };
+          }>;
+          return (
+            <Card className="border-red-100">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Clock className="h-4 w-4 text-red-600" />
+                  풋옵션 행사 가능 종목
+                  <span className="text-xs text-gray-400 font-normal ml-1">
+                    (오늘 {new Date().toLocaleDateString("ko-KR")})
+                  </span>
+                </CardTitle>
+                <span className="text-xs font-semibold text-red-600">
+                  {exercisable.length}건
+                </span>
+              </CardHeader>
+              <CardContent className="py-3">
+                {exercisable.length === 0 ? (
+                  <p className="text-xs text-gray-400">현재 행사 가능한 종목이 없습니다.</p>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {exercisable.map(({ pos, win }) => (
+                      <Link
+                        key={pos.id}
+                        href={`/positions/${pos.id}`}
+                        className="flex items-center gap-3 px-3 py-2 rounded-lg bg-red-50 hover:bg-red-100 transition-colors border border-red-100"
+                      >
+                        <span className="text-sm font-semibold text-gray-900">
+                          {pos.assetName}
+                        </span>
+                        <span className="text-xs text-gray-500 tabular-nums">
+                          {pos.investmentAmount
+                            ? formatKRWShort(Number(pos.investmentAmount))
+                            : "-"}
+                        </span>
+                        <span className="text-xs text-red-700 tabular-nums font-medium">
+                          {win.from.slice(0, 10)} ~ {win.to.slice(0, 10)}
+                        </span>
+                      </Link>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          );
+        })()}
+
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* 최근 알림 (긴급 + 경고 + 정보 병합, 시간 desc) */}
           <Card>
             <CardHeader>
               <CardTitle>최근 알림</CardTitle>
-              <span className="text-xs text-gray-400">
-                주가 ±5% · 전일/당일 공시 · 실적/보고서
-              </span>
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-gray-400 hidden sm:inline">
+                  주가 ±5% · 전일/당일 공시
+                </span>
+                {alertList.some((a) => a.id) && (
+                  <button
+                    onClick={clearAllAlerts}
+                    className="text-xs text-gray-500 hover:text-red-600"
+                    title="모든 알림 삭제"
+                  >
+                    전체 삭제
+                  </button>
+                )}
+              </div>
             </CardHeader>
             <div className="divide-y divide-gray-50 max-h-[420px] overflow-y-auto">
               {loading ? (
@@ -499,8 +634,8 @@ export default function DashboardPage() {
                 <div className="px-5 py-8 text-center text-sm text-gray-400">알림이 없습니다</div>
               ) : (
                 recent.map((alert, i) => {
-                  const content = (
-                    <div className="px-5 py-3 flex items-start gap-3 hover:bg-gray-50 transition-colors">
+                  const inner = (
+                    <div className="flex items-start gap-3 px-5 py-3 hover:bg-gray-50 transition-colors">
                       <Badge
                         variant={severityBadge(alert.severity)}
                         className="mt-0.5 flex-shrink-0"
@@ -513,25 +648,47 @@ export default function DashboardPage() {
                       </div>
                     </div>
                   );
-                  return alert.url ? (
+                  const body = alert.url ? (
                     alert.url.startsWith("/") ? (
-                      <Link key={i} href={alert.url}>
-                        {content}
+                      <Link href={alert.url} className="flex-1 min-w-0">
+                        {inner}
                       </Link>
                     ) : (
-                      <a key={i} href={alert.url} target="_blank" rel="noopener noreferrer">
-                        {content}
+                      <a
+                        href={alert.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex-1 min-w-0"
+                      >
+                        {inner}
                       </a>
                     )
                   ) : (
-                    <div key={i}>{content}</div>
+                    <div className="flex-1 min-w-0">{inner}</div>
+                  );
+                  return (
+                    <div key={alert.id ?? i} className="flex items-stretch group">
+                      {body}
+                      {alert.id && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            deleteAlert(alert.id!);
+                          }}
+                          className="px-3 flex items-center text-gray-300 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
+                          title="알림 삭제"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      )}
+                    </div>
                   );
                 })
               )}
             </div>
           </Card>
 
-          {/* 주가 변동 TOP 5 */}
+          {/* 주가 변동 TOP — 좌: 상승 상위 5, 우: 하락 상위 5 */}
           <Card>
             <CardHeader>
               <CardTitle>주가 변동 TOP 5</CardTitle>
@@ -539,67 +696,80 @@ export default function DashboardPage() {
                 전체보기
               </Link>
             </CardHeader>
-            <div className="divide-y divide-gray-50">
-              {loading ? (
-                <div className="px-5 py-8 text-center text-sm text-gray-400">불러오는 중...</div>
-              ) : !stats?.topMovers.length ? (
-                <div className="px-5 py-8 text-center text-sm text-gray-400">
-                  등록된 종목이 없습니다.{" "}
-                  <Link href="/positions/new" className="text-[#0A2A5E] hover:underline">
-                    종목 등록하기
-                  </Link>
-                </div>
-              ) : (
-                stats.topMovers.map((mover) => {
-                  const isRise = (mover.changeRate ?? 0) > 0;
-                  const isFall = (mover.changeRate ?? 0) < 0;
-                  const parity =
-                    mover.currentPrice && mover.currentConversionPrice
-                      ? (mover.currentPrice / mover.currentConversionPrice) * 100
-                      : null;
-
-                  return (
-                    <Link
-                      key={mover.id}
-                      href={`/positions/${mover.id}`}
-                      className="flex items-center gap-3 px-5 py-3 hover:bg-gray-50 transition-colors"
-                    >
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-gray-900 truncate">
-                          {mover.underlyingCompanyName}
-                        </p>
-                        <p className="text-xs text-gray-500 truncate">{mover.assetName}</p>
-                      </div>
-                      <div className="text-right">
-                        <p
-                          className={`text-sm font-semibold tabular-nums ${
-                            isRise ? "text-rise" : isFall ? "text-fall" : "text-gray-600"
-                          }`}
+            {loading ? (
+              <div className="px-5 py-8 text-center text-sm text-gray-400">불러오는 중...</div>
+            ) : !stats || (stats.topRisers.length === 0 && stats.topFallers.length === 0) ? (
+              <div className="px-5 py-8 text-center text-sm text-gray-400">
+                등록된 종목이 없거나 시세를 조회할 수 없습니다.
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 divide-x divide-gray-100">
+                {/* 상승 */}
+                <div>
+                  <div className="px-4 py-2 text-xs font-semibold text-rise bg-red-50/40 flex items-center gap-1">
+                    <TrendingUp className="h-3 w-3" />
+                    상승
+                  </div>
+                  <div className="divide-y divide-gray-50">
+                    {stats.topRisers.length === 0 ? (
+                      <p className="px-4 py-6 text-center text-xs text-gray-400">
+                        상승 종목 없음
+                      </p>
+                    ) : (
+                      stats.topRisers.map((mover) => (
+                        <Link
+                          key={mover.id}
+                          href={`/positions/${mover.id}`}
+                          className="flex items-center gap-2 px-4 py-2.5 hover:bg-gray-50 transition-colors"
                         >
-                          {mover.changeRate !== null ? (
-                            <>
-                              {isRise ? (
-                                <TrendingUp className="inline h-3 w-3 mr-0.5" />
-                              ) : isFall ? (
-                                <TrendingDown className="inline h-3 w-3 mr-0.5" />
-                              ) : null}
-                              {formatPercent(mover.changeRate)}
-                            </>
-                          ) : (
-                            "시세 없음"
-                          )}
-                        </p>
-                        {parity !== null && (
-                          <p className="text-xs text-gray-400 tabular-nums">
-                            패리티 {parity.toFixed(0)}%
-                          </p>
-                        )}
-                      </div>
-                    </Link>
-                  );
-                })
-              )}
-            </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-gray-900 truncate">
+                              {mover.underlyingCompanyName}
+                            </p>
+                            <p className="text-xs text-gray-400 truncate">{mover.assetName}</p>
+                          </div>
+                          <span className="text-sm font-semibold text-rise tabular-nums">
+                            {formatPercent(mover.changeRate ?? 0)}
+                          </span>
+                        </Link>
+                      ))
+                    )}
+                  </div>
+                </div>
+                {/* 하락 */}
+                <div>
+                  <div className="px-4 py-2 text-xs font-semibold text-fall bg-blue-50/40 flex items-center gap-1">
+                    <TrendingDown className="h-3 w-3" />
+                    하락
+                  </div>
+                  <div className="divide-y divide-gray-50">
+                    {stats.topFallers.length === 0 ? (
+                      <p className="px-4 py-6 text-center text-xs text-gray-400">
+                        하락 종목 없음
+                      </p>
+                    ) : (
+                      stats.topFallers.map((mover) => (
+                        <Link
+                          key={mover.id}
+                          href={`/positions/${mover.id}`}
+                          className="flex items-center gap-2 px-4 py-2.5 hover:bg-gray-50 transition-colors"
+                        >
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-gray-900 truncate">
+                              {mover.underlyingCompanyName}
+                            </p>
+                            <p className="text-xs text-gray-400 truncate">{mover.assetName}</p>
+                          </div>
+                          <span className="text-sm font-semibold text-fall tabular-nums">
+                            {formatPercent(mover.changeRate ?? 0)}
+                          </span>
+                        </Link>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
           </Card>
         </div>
 
