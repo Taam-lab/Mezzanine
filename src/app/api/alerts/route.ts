@@ -6,6 +6,26 @@ import { sendTelegramAlert } from "@/lib/telegram";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+/**
+ * DISCLOSURE 알림 노이즈 정리:
+ *   - metadata:null → 이전 버전 (접수일 없음) — 사용자가 시각을 오독하므로 삭제
+ *   - createdAt 3일 이상 지난 DISCLOSURE — 인박스는 실시간 트리거 용도, DART 에 원문 있음
+ * 여러 진입점에서 호출되도록 헬퍼로 분리.
+ */
+async function cleanupStaleDisclosures(): Promise<void> {
+  try {
+    const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+    await prisma.alert.deleteMany({
+      where: {
+        alertType: "DISCLOSURE",
+        OR: [{ metadata: null }, { createdAt: { lt: threeDaysAgo } }],
+      },
+    });
+  } catch {
+    // ignore
+  }
+}
+
 interface IncomingAlert {
   positionId?: string | null;
   alertType: string; // "PRICE_MOVE" | "DISCLOSURE" | ...
@@ -26,6 +46,9 @@ export async function GET(req: NextRequest) {
   const countOnly = searchParams.get("countOnly") === "true";
   const page = parseInt(searchParams.get("page") || "1");
   const limit = parseInt(searchParams.get("limit") || "20");
+
+  // GET 진입 때에도 정리 (조회 시점마다 옛 노이즈 자동 정리 — 첫 GET 후 인박스 깔끔).
+  await cleanupStaleDisclosures();
 
   if (countOnly) {
     const count = await prisma.alertUserStatus.count({
@@ -62,24 +85,13 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const { alerts } = (await req.json()) as { alerts: IncomingAlert[] };
+
+    // 정리는 alerts 가 비어있어도 항상 실행 (classifier 가 필터해서 0개가 오는
+    // 정상 경로에도 옛 알림 청소가 걸리도록).
+    await cleanupStaleDisclosures();
+
     if (!Array.isArray(alerts) || alerts.length === 0) {
       return NextResponse.json({ created: 0 });
-    }
-
-    // 자동 정리: DISCLOSURE 알림 노이즈 청소
-    //   - metadata:null → 이전 버전에서 접수일 저장 없이 만들어진 알림 (스캔이 옛 공시도
-    //     긴급으로 잡던 시절). 접수일을 알 수 없어 사용자가 시각을 오독하므로 정리.
-    //   - createdAt 3일 이상 지난 것 → 실시간 트리거용 인박스라 노이즈. DART 에 원문 있음.
-    try {
-      const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
-      await prisma.alert.deleteMany({
-        where: {
-          alertType: "DISCLOSURE",
-          OR: [{ metadata: null }, { createdAt: { lt: threeDaysAgo } }],
-        },
-      });
-    } catch {
-      // ignore cleanup errors
     }
 
     let created = 0;
