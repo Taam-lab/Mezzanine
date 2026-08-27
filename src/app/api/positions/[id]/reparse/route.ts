@@ -36,23 +36,27 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
   try {
     const bodyText = await fetchDisclosureBodyText(rcpMatch[1]);
     const extracted = extractPutCall(bodyText);
+
+    // 방어: 시작 > 종료로 뒤집혀 있으면 swap (파싱 로직 회귀 시 최후 안전장치)
+    const orient = (from?: string, to?: string): [string | undefined, string | undefined] => {
+      if (from && to && from > to) return [to, from];
+      return [from, to];
+    };
+    const [putStart, putEnd] = orient(extracted.putOptionStartDate, extracted.putOptionEndDate);
+    const [callStart, callEnd] = orient(
+      extracted.callOptionStartDate,
+      extracted.callOptionEndDate,
+    );
+
     const updated = await prisma.position.update({
       where: { id: params.id },
       data: {
-        putOptionStartDate: extracted.putOptionStartDate
-          ? new Date(extracted.putOptionStartDate)
-          : null,
-        putOptionEndDate: extracted.putOptionEndDate
-          ? new Date(extracted.putOptionEndDate)
-          : null,
+        putOptionStartDate: putStart ? new Date(putStart) : null,
+        putOptionEndDate: putEnd ? new Date(putEnd) : null,
         putOptionSchedule: extracted.putOptionSchedule ?? null,
         putOptionRate: extracted.putOptionRate ?? undefined,
-        callOptionStartDate: extracted.callOptionStartDate
-          ? new Date(extracted.callOptionStartDate)
-          : undefined,
-        callOptionEndDate: extracted.callOptionEndDate
-          ? new Date(extracted.callOptionEndDate)
-          : undefined,
+        callOptionStartDate: callStart ? new Date(callStart) : undefined,
+        callOptionEndDate: callEnd ? new Date(callEnd) : undefined,
         callOptionRatio: extracted.callOptionRatio ?? undefined,
         callOptionRate: extracted.callOptionRate ?? undefined,
       },
