@@ -169,29 +169,37 @@ export function extractPutCall(text: string): PutCallExtraction {
       if (days < 0 || days > 45) continue;
       rows.push({ from, to });
     }
-    // Outlier 제거: 정렬한 뒤 가장 큰 gap 이 6개월 초과이고 전체 span 이 12개월 초과면
-    // 이자지급 표 등 다른 섹션에서 잘못 넘어온 행들이라 판단하여 큰 그룹만 남김.
-    // 진짜 풋옵션 회차는 3개월 간격의 quorterly cadence 라 큰 gap 이 없음.
+    // Cadence 기반 클러스터링:
+    //   진짜 풋옵션 회차는 quarterly (~90일) 간격. 정렬한 뒤 successive gap 이
+    //   [60, 120]일 범위 안에 있는 연속 구간을 그룹으로 묶고, 가장 큰 그룹만 남김.
+    //   → 마이크로디지탈 케이스: 이자표 5행 (quarterly) + 실제 풋 12행 (quarterly)
+    //     사이의 gap 이 30일이라 max-gap 로직으로는 못 잡음. 이 짧은 gap 이 두 표의
+    //     경계라는 걸 여기서 감지.
     if (rows.length >= 4) {
       const sortedRows = [...rows].sort((a, b) => a.from.localeCompare(b.from));
+      const dayMs = 24 * 60 * 60 * 1000;
       const dates = sortedRows.map((r) => new Date(r.from).getTime());
-      let maxGap = 0;
-      let gapAt = -1;
+      const groups: number[][] = [];
+      let current: number[] = [0];
       for (let i = 1; i < dates.length; i++) {
-        const gap = dates[i] - dates[i - 1];
-        if (gap > maxGap) {
-          maxGap = gap;
-          gapAt = i;
+        const gapDays = Math.round((dates[i] - dates[i - 1]) / dayMs);
+        // 60~120일: quarterly 허용 범위 (2월 짧은달 포함 89일 ~ 3월 92일 커버).
+        // 그 외 gap 은 표 경계로 판단.
+        if (gapDays >= 60 && gapDays <= 120) {
+          current.push(i);
+        } else {
+          groups.push(current);
+          current = [i];
         }
       }
-      const monthMs = 30 * 24 * 60 * 60 * 1000;
-      if (maxGap > 6 * monthMs && dates[dates.length - 1] - dates[0] > 12 * monthMs) {
-        const left = sortedRows.slice(0, gapAt);
-        const right = sortedRows.slice(gapAt);
-        rows = right.length >= left.length ? right : left;
-      } else {
-        rows = sortedRows;
-      }
+      groups.push(current);
+      // 가장 큰 그룹만 유지. 동률이면 뒤쪽 (미래) 그룹 우선 — 이자표는 통상 앞에 오고
+      // 풋옵션은 뒤에 오므로 tiebreak 로 뒤 유리.
+      groups.sort((a, b) =>
+        b.length !== a.length ? b.length - a.length : b[0] - a[0],
+      );
+      const keep = new Set(groups[0]);
+      rows = sortedRows.filter((_, i) => keep.has(i));
     }
 
     if (rows.length > 0) {
