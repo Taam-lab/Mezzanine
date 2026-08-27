@@ -304,19 +304,35 @@ async function fetchDartOrNaverDisclosures(
   return items;
 }
 
+/**
+ * 공시 심각도 판정. 접수일이 최근 며칠 이내가 아니면 알림 대상 아님 —
+ * 사업보고서·반기보고서처럼 스캔에 새로 걸린 옛 공시가 매번 긴급 알림으로
+ * 뜨는 걸 방지.
+ */
 function classifyDisclosure(
   d: FeedItem,
   todayIso: string,
   yesterdayIso: string,
 ): "CRITICAL" | "WARNING" | null {
   const title = d.title;
-  const critical =
+  const day = d.isoDate.slice(0, 10);
+
+  // 접수일이 없거나 파싱 실패 → 안전하게 알림 대상 아님
+  if (!day || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
+
+  // CRITICAL 대상 키워드
+  const criticalKeyword =
     /사업보고서|분기보고서|반기보고서/.test(title) ||
     /(?:영업|매출|손익).{0,15}(?:실적|구조|변경)/.test(title) ||
     /영업\s*\(?잠정\)?\s*실적/.test(title) ||
     /주요경영사항|현금·현물배당결정/.test(title);
-  if (critical) return "CRITICAL";
-  const day = d.isoDate.slice(0, 10);
+
+  // CRITICAL: 키워드 매칭 + 오늘/어제 접수만 (옛 공시 재알림 방지)
+  if (criticalKeyword && (day === todayIso || day === yesterdayIso)) {
+    return "CRITICAL";
+  }
+
+  // WARNING: 오늘/어제 접수된 나머지 공시
   if (day === todayIso || day === yesterdayIso) return "WARNING";
   return null;
 }

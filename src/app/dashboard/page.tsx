@@ -30,6 +30,7 @@ interface DbAlertItem {
   severity: string;
   createdAt: string;
   sourceUrl?: string;
+  metadata?: string | null;
   position?: { assetName: string };
 }
 
@@ -234,16 +235,30 @@ export default function DashboardPage() {
         }
       }
 
-      const dbAlerts: UiAlert[] = (dbAlertRes as DbAlertItem[]).map((a) => ({
-        severity: (["CRITICAL", "WARNING", "INFO"].includes(a.severity)
-          ? a.severity
-          : "INFO") as "CRITICAL" | "WARNING" | "INFO",
-        title: a.title,
-        url: a.sourceUrl,
-        date: formatDateTime(a.createdAt),
-        isoDate: a.createdAt,
-        kind: "db",
-      }));
+      const dbAlerts: UiAlert[] = (dbAlertRes as DbAlertItem[]).map((a) => {
+        // metadata.eventAt (공시 접수일 등) 이 있으면 표시·정렬에 우선 사용.
+        // 없으면 createdAt (DB 저장 시각) 폴백.
+        let eventAt: string | null = null;
+        if (a.metadata) {
+          try {
+            const meta = JSON.parse(a.metadata) as { eventAt?: string };
+            if (meta.eventAt) eventAt = meta.eventAt;
+          } catch {
+            // ignore
+          }
+        }
+        const displayIso = eventAt ?? a.createdAt;
+        return {
+          severity: (["CRITICAL", "WARNING", "INFO"].includes(a.severity)
+            ? a.severity
+            : "INFO") as "CRITICAL" | "WARNING" | "INFO",
+          title: a.title,
+          url: a.sourceUrl,
+          date: formatDateTime(displayIso),
+          isoDate: displayIso,
+          kind: "db",
+        };
+      });
 
       setStats({ totalPositions: positions.length, topMovers: movers });
       setAlertList(
@@ -335,6 +350,7 @@ export default function DashboardPage() {
           }
 
           // 공시 알림 DB 저장 (sourceUrl 기반 dedup — 같은 rcpNo는 한 번만 저장됨)
+          //   eventAt = 공시 접수일 (feed의 isoDate). Alert.metadata 에 저장되어 UI 가 표시 시각으로 사용.
           if (disclosureAlerts.length > 0) {
             const posByTicker = new Map(positions.map((p) => [p.underlyingTicker, p.id]));
             fetch("/api/alerts", {
@@ -347,6 +363,7 @@ export default function DashboardPage() {
                   severity: a.severity,
                   title: a.title,
                   sourceUrl: a.url,
+                  eventAt: a.isoDate,
                 })),
               }),
             }).catch(() => {});

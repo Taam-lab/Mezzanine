@@ -13,7 +13,9 @@ interface IncomingAlert {
   title: string;
   body?: string | null;
   sourceUrl?: string | null;
-  /** dedup 윈도우 (분). 같은 (positionId, alertType, title) 이 이 시간 안에 있으면 스킵. */
+  /** ISO 문자열. 있으면 Alert.metadata 에 JSON 으로 저장해 UI 가 접수/발생 시각 표시에 사용. */
+  eventAt?: string | null;
+  /** dedup 윈도우 (분). */
   dedupWithinMinutes?: number;
 }
 
@@ -64,6 +66,22 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ created: 0 });
     }
 
+    // 자동 정리: DISCLOSURE 알림 노이즈 청소
+    //   - metadata:null → 이전 버전에서 접수일 저장 없이 만들어진 알림 (스캔이 옛 공시도
+    //     긴급으로 잡던 시절). 접수일을 알 수 없어 사용자가 시각을 오독하므로 정리.
+    //   - createdAt 3일 이상 지난 것 → 실시간 트리거용 인박스라 노이즈. DART 에 원문 있음.
+    try {
+      const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+      await prisma.alert.deleteMany({
+        where: {
+          alertType: "DISCLOSURE",
+          OR: [{ metadata: null }, { createdAt: { lt: threeDaysAgo } }],
+        },
+      });
+    } catch {
+      // ignore cleanup errors
+    }
+
     let created = 0;
     for (const a of alerts) {
       if (!a?.title || !a.alertType || !a.severity) continue;
@@ -101,6 +119,7 @@ export async function POST(req: NextRequest) {
           title: a.title,
           body: a.body ?? null,
           sourceUrl: a.sourceUrl ?? null,
+          metadata: a.eventAt ? JSON.stringify({ eventAt: a.eventAt }) : null,
         },
       });
       created++;
