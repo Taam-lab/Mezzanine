@@ -155,7 +155,7 @@ export function extractPutCall(text: string): PutCallExtraction {
     // 1순위: 표 행 패턴 "N차 <From date> <To date>"
     //   회차 표기: 1차 / 10차 / 100차 / 제1회 / 제N차 / N회차 등 다양한 변형 커버.
     const rowRe = /(?:제\s*)?(?:\d{1,3})\s*(?:차|회차|회)\D{0,20}(\d{4})[년\-./\s]{1,3}(\d{1,2})[월\-./\s]{1,3}(\d{1,2})[일]?[\s\S]{1,40}?(\d{4})[년\-./\s]{1,3}(\d{1,2})[월\-./\s]{1,3}(\d{1,2})[일]?/g;
-    const rows: Array<{ from: string; to: string }> = [];
+    let rows: Array<{ from: string; to: string }> = [];
     let rm: RegExpExecArray | null;
     while ((rm = rowRe.exec(putSec)) !== null) {
       const from = normalizeDate(rm[1], rm[2], rm[3]);
