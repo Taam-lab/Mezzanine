@@ -148,8 +148,27 @@ export function extractPutCall(text: string): PutCallExtraction {
   // ─────────────────────────────────────────────
   const putIdx = text.search(/조기상환청구권|조기상환\s*청구\s*기간|Put\s*Option/i);
   if (putIdx !== -1) {
-    // 조기상환은 3개월마다 청구권 발생하는 표가 만기까지 이어지므로 넉넉하게 5000자
-    const putSec = text.slice(putIdx, putIdx + 5000);
+    // 5000자 통째 스캔 시 근처의 매도청구권/이자지급/사채상환 표까지 회차로
+    // 잘못 잡히던 문제 방지 — 시작에서 다음 섹션 헤더 직전까지만 잘라 사용.
+    const raw = text.slice(putIdx, putIdx + 6000);
+    const nextSecPatterns = [
+      /매도청구권|Call\s*Option/i,
+      /이자\s*지급/,
+      /사채(?:의)?\s*상환/,
+      /기타\s*투자\s*판단/,
+      /납입\s*(?:방법|일자)/,
+      /담보\s*(?:제공|관련)/,
+      /주요\s*경영\s*사항/,
+    ];
+    let endIdx = raw.length;
+    for (const p of nextSecPatterns) {
+      // 시작에서 100자 이후에 나오는 첫 매치를 upper bound 로 사용 (100자 이내는
+      // "조기상환청구권" 헤더 자체와의 근접 오탐 방지).
+      const searchIn = raw.slice(100);
+      const m = searchIn.search(p);
+      if (m !== -1) endIdx = Math.min(endIdx, 100 + m);
+    }
+    const putSec = raw.slice(0, endIdx);
 
     // 1순위: 표 행 패턴 "N차 <From date> <To date>"
     //   회차 표기: 1차 / 10차 / 100차 / 제1회 / 제N차 / N회차 등 다양한 변형 커버.

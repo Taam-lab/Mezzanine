@@ -520,6 +520,85 @@ export default function PositionDetailPage() {
                     </dl>
                   </section>
                 ))}
+
+                {/* 풋옵션 회차별 스케줄 (파서가 저장한 raw 행 목록 — 디버깅/확인용) */}
+                {position.putOptionSchedule &&
+                  (() => {
+                    let rows: Array<{ from: string; to: string }> = [];
+                    try {
+                      rows = JSON.parse(position.putOptionSchedule);
+                    } catch {
+                      return null;
+                    }
+                    if (!Array.isArray(rows) || rows.length === 0) return null;
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    return (
+                      <section>
+                        <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                          풋옵션 회차별 스케줄 ({rows.length}건)
+                        </h4>
+                        <div className="border border-gray-100 rounded-lg overflow-hidden">
+                          <table className="w-full text-xs">
+                            <thead className="bg-gray-50 text-gray-500">
+                              <tr>
+                                <th className="px-3 py-1.5 text-center w-12">회차</th>
+                                <th className="px-3 py-1.5 text-center">시작일</th>
+                                <th className="px-3 py-1.5 text-center">종료일</th>
+                                <th className="px-3 py-1.5 text-center w-16">일수</th>
+                                <th className="px-3 py-1.5 text-center w-16">상태</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-50">
+                              {rows.map((r, i) => {
+                                const from = new Date(r.from);
+                                const to = new Date(r.to);
+                                const days = Math.round(
+                                  (to.getTime() - from.getTime()) / (1000 * 60 * 60 * 24),
+                                );
+                                const status =
+                                  today > to
+                                    ? "종료"
+                                    : today >= from
+                                      ? "진행"
+                                      : "예정";
+                                const statusColor =
+                                  status === "진행"
+                                    ? "text-red-600 font-semibold"
+                                    : status === "종료"
+                                      ? "text-gray-400"
+                                      : "text-gray-600";
+                                return (
+                                  <tr key={i}>
+                                    <td className="px-3 py-1.5 text-center text-gray-500">
+                                      {i + 1}
+                                    </td>
+                                    <td className="px-3 py-1.5 text-center tabular-nums">
+                                      {r.from}
+                                    </td>
+                                    <td className="px-3 py-1.5 text-center tabular-nums">
+                                      {r.to}
+                                    </td>
+                                    <td
+                                      className={`px-3 py-1.5 text-center tabular-nums ${
+                                        days > 45 || days < 0 ? "text-red-500" : "text-gray-500"
+                                      }`}
+                                      title={days > 45 ? "45일 초과 — 오파싱 의심" : undefined}
+                                    >
+                                      {days}일
+                                    </td>
+                                    <td className={`px-3 py-1.5 text-center ${statusColor}`}>
+                                      {status}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </section>
+                    );
+                  })()}
                 {position.sourceDisclosureUrl && (
                   <div className="mt-4 pt-4 border-t border-gray-100 flex items-center justify-between">
                     <a
