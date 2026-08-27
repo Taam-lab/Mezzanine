@@ -81,7 +81,17 @@ interface PositionSlim {
   isActive: boolean;
 }
 
-/** 오늘 날짜 기준 이 종목이 풋옵션 행사 가능 구간에 있으면 range 반환. */
+/**
+ * 오늘 날짜가 어느 풋옵션 회차 안에 있으면 그 회차 (from, to) 반환.
+ *
+ * 우선순위:
+ *   1. 회차별 스케줄 JSON 이 있으면 → 오늘 포함된 row 만 매칭 (없으면 null 반환)
+ *      스케줄이 있다는 건 파싱이 성공했다는 뜻 → 매칭 실패 = 진짜 현재 행사 불가.
+ *      putOptionStartDate/EndDate 는 스케줄의 첫/마지막 회차를 aggregate 한 값이라
+ *      "전체 lifetime" 이지 "현재 회차" 가 아님. 폴백에 쓰면 잘못된 범위가 뜸.
+ *   2. 스케줄이 없는 옛 종목(파싱 실패) 만 start/end 폴백 사용, 그것도 range <= 62일
+ *      일 때만 (한 회차로 볼 만한 길이). 60+ 일이면 lifetime 이라 신뢰 못 함.
+ */
 function currentPutWindow(p: PositionSlim): { from: string; to: string } | null {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -96,12 +106,16 @@ function currentPutWindow(p: PositionSlim): { from: string; to: string } | null 
     } catch {
       // ignore
     }
+    return null; // 스케줄이 있는데 매칭 실패 = 현재 행사 불가 (start/end 폴백 안 함)
   }
   if (p.putOptionStartDate && p.putOptionEndDate) {
     const from = new Date(p.putOptionStartDate);
     const to = new Date(p.putOptionEndDate);
     if (today >= from && today <= to) {
-      return { from: p.putOptionStartDate, to: p.putOptionEndDate };
+      const days = Math.round((to.getTime() - from.getTime()) / (1000 * 60 * 60 * 24));
+      if (days <= 62) {
+        return { from: p.putOptionStartDate, to: p.putOptionEndDate };
+      }
     }
   }
   return null;
