@@ -69,6 +69,10 @@ export async function POST(req: NextRequest) {
       if (!a?.title || !a.alertType || !a.severity) continue;
 
       // dedup 검사
+      //   - sourceUrl 있으면 sourceUrl 로만 판단 (같은 rcpNo 는 절대 중복 발송 안 함)
+      //   - 없으면 (positionId, alertType, severity) + 시간창
+      //     (title 매칭은 안 씀 — 예: PRICE_MOVE 는 등락률 소수점 때문에 매번 title 이
+      //      달라져 dedup 이 안 걸리던 문제 해결)
       if (a.sourceUrl) {
         const existing = await prisma.alert.findFirst({
           where: { sourceUrl: a.sourceUrl },
@@ -81,7 +85,7 @@ export async function POST(req: NextRequest) {
           where: {
             positionId: a.positionId,
             alertType: a.alertType,
-            title: a.title,
+            severity: a.severity,
             createdAt: { gte: new Date(Date.now() - windowMs) },
           },
           select: { id: true },

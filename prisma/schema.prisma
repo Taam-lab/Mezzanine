@@ -36,6 +36,7 @@ model Position {
   underlyingCompanyName  String    @map("underlying_company_name")
   underlyingMarket       String    @default("KOSPI") @map("underlying_market")
   mezzanineType          String    @default("CB") @map("mezzanine_type")
+  corpCode               String?   @map("corp_code") // DART corp_code — 공시 조회에 필요
   issueDate              DateTime? @map("issue_date")
   investmentType         String    @default("DIRECT") @map("investment_type")
   investmentAmount       BigInt?   @map("investment_amount")

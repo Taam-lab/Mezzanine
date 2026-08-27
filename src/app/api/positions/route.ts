@@ -115,6 +115,7 @@ export async function POST(req: NextRequest) {
         callOptionRate: data.callOptionRate ?? null,
         seriesNumber: data.seriesNumber ?? null,
         sourceDisclosureUrl: data.sourceDisclosureUrl || null,
+        corpCode: data.corpCode || null,
         note: data.note || null,
         ownerUserId: userId,
       },

@@ -34,6 +34,7 @@ interface ParsedDisclosure {
   callOptionEndDate?: string;
   seriesNumber?: number;
   sourceDisclosureUrl?: string;
+  corpCode?: string;
 }
 
 const DART_BASE = "https://opendart.fss.or.kr/api";
@@ -427,6 +428,7 @@ export async function POST(req: NextRequest) {
     // 5단계: 스키마 매핑
     const { data, filled, unfilled } = mapDecisionToSchema(row, type, meta);
     data.sourceDisclosureUrl = url;
+    if (meta.corp_code) data.corpCode = meta.corp_code;
 
     // 6단계: 풋/콜 조항은 정형 API에 없으므로 원문 스크래핑 + 정규식 추출
     const putCallKeys: Array<keyof PutCallExtraction> = [

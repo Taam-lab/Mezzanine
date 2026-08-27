@@ -72,6 +72,7 @@ export const positionSchema = z.object({
   callOptionRate: optionalNumber((n) => n.min(0).max(100)),
   seriesNumber: optionalNumber((n) => n.int().positive()),
   sourceDisclosureUrl: z.string().url().optional().or(z.literal("")),
+  corpCode: z.string().optional(),
   note: z.string().optional(),
 });
 

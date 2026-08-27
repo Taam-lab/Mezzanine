@@ -1,4 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import {
+  fetchDartDisclosuresByCorpCode,
+  resolveCorpCodeByRcpNo,
+} from "@/lib/dartDisclosures";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -188,9 +193,11 @@ async function fetchGoogleNews(ticker: string, companyName: string): Promise<Fee
 }
 
 // ─────────────────────────────────────────────
-// 공시: Naver Finance news_notice (rcpNo → DART 뷰어)
+// 공시: DART OpenAPI 우선 (corp_code 필요), 없으면 Naver 폴백
 // ─────────────────────────────────────────────
-async function fetchNaverDisclosures(
+
+/** DART list.json 기반. 티커의 corp_code 를 DB 에서 조회, 없으면 Naver 폴백. */
+async function fetchDartOrNaverDisclosures(
   ticker: string,
   companyName: string,
 ): Promise<FeedItem[]> {
@@ -198,6 +205,63 @@ async function fetchNaverDisclosures(
   const hit = getCached(disclosureCache, cacheKey);
   if (hit) return hit;
 
+  const apiKey = process.env.DART_API_KEY;
+  if (apiKey) {
+    // 해당 티커의 활성 포지션 중 하나에서 corp_code 조회
+    let corpCode: string | null = null;
+    try {
+      const pos = await prisma.position.findFirst({
+        where: { underlyingTicker: ticker, isActive: true, corpCode: { not: null } },
+        select: { corpCode: true },
+      });
+      corpCode = pos?.corpCode ?? null;
+
+      // 없으면 sourceDisclosureUrl 로 resolve + 저장
+      if (!corpCode) {
+        const posWithUrl = await prisma.position.findFirst({
+          where: {
+            underlyingTicker: ticker,
+            isActive: true,
+            sourceDisclosureUrl: { not: null },
+          },
+          select: { id: true, sourceDisclosureUrl: true },
+        });
+        if (posWithUrl?.sourceDisclosureUrl) {
+          const rcpMatch = posWithUrl.sourceDisclosureUrl.match(/rcpNo=(\d+)/i);
+          if (rcpMatch) {
+            const resolved = await resolveCorpCodeByRcpNo(rcpMatch[1], apiKey);
+            if (resolved) {
+              corpCode = resolved;
+              await prisma.position.updateMany({
+                where: { underlyingTicker: ticker, corpCode: null },
+                data: { corpCode: resolved },
+              });
+            }
+          }
+        }
+      }
+    } catch {
+      // DB 문제 → Naver 폴백
+    }
+
+    if (corpCode) {
+      const dart = await fetchDartDisclosuresByCorpCode(corpCode, apiKey, 30);
+      if (dart.length > 0) {
+        const items: FeedItem[] = dart.slice(0, 12).map((d) => ({
+          title: d.title,
+          url: d.url,
+          date: d.date,
+          isoDate: d.isoDate,
+          ticker,
+          companyName,
+        }));
+        setCached(disclosureCache, cacheKey, items);
+        return items;
+      }
+    }
+  }
+
+  // Naver 폴백
   const url = `https://finance.naver.com/item/news_notice.naver?code=${ticker}&page=1`;
   const html = await fetchText(url, 4000);
   if (!html) {
@@ -263,7 +327,7 @@ async function fetchOneTicker(
 ): Promise<{ news: FeedItem[]; disclosures: FeedItem[] }> {
   const [news, disclosures] = await Promise.all([
     fetchGoogleNews(ticker, companyName).catch(() => []),
-    fetchNaverDisclosures(ticker, companyName).catch(() => []),
+    fetchDartOrNaverDisclosures(ticker, companyName).catch(() => []),
   ]);
   return { news, disclosures };
 }
