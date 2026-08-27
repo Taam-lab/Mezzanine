@@ -85,11 +85,25 @@ export function extractPutCall(text: string): PutCallExtraction {
   // ─────────────────────────────────────────────
   const callIdx = findCallSectionStart(text);
   if (callIdx !== -1) {
-    // 5000자로 확대 — 표가 만기까지 이어질 수 있고 서두 산문+표가 이어짐
-    const callSec = text.slice(callIdx, callIdx + 5000);
+    // 창 5000자 통째면 조기상환청구권/이자지급 표까지 삼켜서 시작·종료가 뒤바뀜.
+    // 다음 섹션 헤더까지만 잘라내되, 시작에서 200자 이후에 나오는 것만 인정
+    // (헤더 자체나 요약 문구 안의 언급으로부터 오탐 방지).
+    const rawCall = text.slice(callIdx, callIdx + 5000);
+    const nextSecPatterns = [
+      /조기상환청구권|조기상환\s*청구\s*기간|Put\s*Option/i,
+      /이자\s*지급/,
+      /사채(?:의)?\s*상환/,
+      /기타\s*투자\s*판단/,
+      /주요\s*경영\s*사항/,
+    ];
+    let endIdx = rawCall.length;
+    for (const p of nextSecPatterns) {
+      const searchIn = rawCall.slice(200);
+      const m = searchIn.search(p);
+      if (m !== -1) endIdx = Math.min(endIdx, 200 + m);
+    }
+    const callSec = rawCall.slice(0, endIdx);
 
-    // 1순위: 표 행 패턴 "N차 <date>" — 매매대금 지급기일이 나열되는 표
-    // 뒤에 매매가액 %가 오는 경우가 많지만, 필수는 아님
     const rowRe = /(?:\d{1,3}|[제])\s*차\D{0,20}(\d{4})[년\-./\s]{1,3}(\d{1,2})[월\-./\s]{1,3}(\d{1,2})[일]?/g;
     const rowDates: string[] = [];
     let rm: RegExpExecArray | null;
@@ -101,19 +115,19 @@ export function extractPutCall(text: string): PutCallExtraction {
     }
 
     if (rowDates.length >= 1) {
-      result.callOptionStartDate = rowDates[0];
-      result.callOptionEndDate = rowDates[rowDates.length - 1];
+      // 오름차순 정렬 후 min/max 사용 — 문서 등장 순서로 잡으면 종료 < 시작 뒤바뀜 발생.
+      const sorted = [...rowDates].sort();
+      result.callOptionStartDate = sorted[0];
+      result.callOptionEndDate = sorted[sorted.length - 1];
     } else {
-      // 2순위: "매매대금 지급기일" 헤더 뒤 날짜 목록
       const paymentIdx = callSec.search(/매매대금\s*지급\s*기일|지급\s*기일|매매\s*일자/);
       if (paymentIdx !== -1) {
         const payWindow = callSec.slice(paymentIdx, paymentIdx + 2000);
-        const dates = extractAllDates(payWindow);
+        const dates = extractAllDates(payWindow).sort();
         if (dates.length >= 1) result.callOptionStartDate = dates[0];
         if (dates.length >= 2) result.callOptionEndDate = dates[dates.length - 1];
       } else {
-        // 3순위: 서두 산문에 "N개월이 되는 날 YYYY-MM-DD" 형태
-        const dates = extractAllDates(callSec);
+        const dates = extractAllDates(callSec).sort();
         if (dates.length >= 2) {
           result.callOptionStartDate = dates[0];
           result.callOptionEndDate = dates[dates.length - 1];
