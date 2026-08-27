@@ -130,6 +130,7 @@ export default function DashboardPage() {
   const [feedsLoading, setFeedsLoading] = useState(false);
   const [alertList, setAlertList] = useState<UiAlert[]>([]);
   const [positions, setPositions] = useState<PositionSlim[]>([]);
+  const [livePrices, setLivePrices] = useState<Record<string, number>>({});
 
   async function deleteAlert(alertId: string) {
     try {
@@ -168,6 +169,7 @@ export default function DashboardPage() {
           const c = JSON.parse(cached) as {
             stats?: DashboardStats;
             positions?: PositionSlim[];
+            livePrices?: Record<string, number>;
             news?: FeedItem[];
             disclosures?: FeedItem[];
             alertList?: UiAlert[];
@@ -175,6 +177,7 @@ export default function DashboardPage() {
           };
           if (c.stats) setStats(c.stats);
           if (c.positions) setPositions(c.positions);
+          if (c.livePrices) setLivePrices(c.livePrices);
           if (c.news) setNews(c.news);
           if (c.disclosures) setDisclosures(c.disclosures);
           if (c.alertList) setAlertList(c.alertList);
@@ -254,6 +257,12 @@ export default function DashboardPage() {
       }
 
       setPositions(positions);
+      // 티커별 현재가 map (풋 카드 패리티 계산에 사용)
+      const priceMap: Record<string, number> = {};
+      for (const [t, q] of Object.entries(quotes)) {
+        if (typeof q?.price === "number") priceMap[t] = q.price;
+      }
+      setLivePrices(priceMap);
       setStats({ totalPositions: positions.length, topRisers: [], topFallers: [] });
       setLastUpdated(new Date());
       setLoading(false);
@@ -423,6 +432,7 @@ export default function DashboardPage() {
               JSON.stringify({
                 stats: { totalPositions: positions.length, topRisers, topFallers },
                 positions,
+                livePrices: priceMap,
                 news: feedData.news ?? [],
                 disclosures: feedData.disclosures ?? [],
                 alertList: mergedAlerts,
@@ -595,25 +605,50 @@ export default function DashboardPage() {
                   <p className="text-xs text-gray-400">현재 행사 가능한 종목이 없습니다.</p>
                 ) : (
                   <div className="flex flex-wrap gap-2">
-                    {exercisable.map(({ pos, win }) => (
-                      <Link
-                        key={pos.id}
-                        href={`/positions/${pos.id}`}
-                        className="flex items-center gap-3 px-3 py-2 rounded-lg bg-red-50 hover:bg-red-100 transition-colors border border-red-100"
-                      >
-                        <span className="text-sm font-semibold text-gray-900">
-                          {pos.assetName}
-                        </span>
-                        <span className="text-xs text-gray-500 tabular-nums">
-                          {pos.investmentAmount
-                            ? formatKRWShort(Number(pos.investmentAmount))
-                            : "-"}
-                        </span>
-                        <span className="text-xs text-red-700 tabular-nums font-medium">
-                          {win.from.slice(0, 10)} ~ {win.to.slice(0, 10)}
-                        </span>
-                      </Link>
-                    ))}
+                    {exercisable.map(({ pos, win }) => {
+                      const price = livePrices[pos.underlyingTicker];
+                      const parity =
+                        price && pos.currentConversionPrice
+                          ? (price / pos.currentConversionPrice) * 100
+                          : null;
+                      // YYYY-MM-DD → YY.MM.DD
+                      const shortDate = (iso: string) => {
+                        const m = iso.match(/(\d{2})(\d{2})-(\d{2})-(\d{2})/);
+                        return m ? `${m[2]}.${m[3]}.${m[4]}` : iso.slice(0, 10);
+                      };
+                      return (
+                        <Link
+                          key={pos.id}
+                          href={`/positions/${pos.id}`}
+                          className="flex items-center gap-3 px-3 py-2 rounded-lg bg-red-50 hover:bg-red-100 transition-colors border border-red-100"
+                        >
+                          <span className="text-sm font-semibold text-gray-900">
+                            {pos.assetName}
+                          </span>
+                          <span className="text-xs text-gray-500 tabular-nums">
+                            {pos.investmentAmount
+                              ? formatKRWShort(Number(pos.investmentAmount))
+                              : "-"}
+                          </span>
+                          <span
+                            className={`text-xs tabular-nums font-medium ${
+                              parity === null
+                                ? "text-gray-400"
+                                : parity >= 100
+                                  ? "text-green-600"
+                                  : parity >= 80
+                                    ? "text-yellow-600"
+                                    : "text-red-600"
+                            }`}
+                          >
+                            {parity !== null ? `패리티 ${parity.toFixed(0)}%` : "패리티 -"}
+                          </span>
+                          <span className="text-xs text-red-700 tabular-nums font-medium">
+                            {shortDate(win.from)} ~ {shortDate(win.to)}
+                          </span>
+                        </Link>
+                      );
+                    })}
                   </div>
                 )}
               </CardContent>
