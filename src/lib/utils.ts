@@ -37,7 +37,7 @@ export function formatDateTime(date: Date | string | null | undefined): string {
   return d.toLocaleString("ko-KR");
 }
 
-export const MEZZANINE_TYPES = ["CB", "BW", "EB", "RCPS"] as const;
+export const MEZZANINE_TYPES = ["CB", "BW", "EB", "RCPS", "COMMON"] as const;
 export const MARKETS = ["KOSPI", "KOSDAQ"] as const;
 export const INVESTMENT_TYPES = ["DIRECT", "INDIRECT"] as const;
 export const SEVERITY_LEVELS = ["CRITICAL", "WARNING", "INFO"] as const;
@@ -66,6 +66,7 @@ export const MEZZANINE_TYPE_LABEL: Record<string, string> = {
   BW: "신주인수권부사채 (BW)",
   EB: "교환사채 (EB)",
   RCPS: "상환전환우선주 (RCPS)",
+  COMMON: "보통주",
 };
 
 export const INVESTMENT_TYPE_LABEL: Record<string, string> = {

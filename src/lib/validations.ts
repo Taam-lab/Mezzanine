@@ -49,7 +49,7 @@ export const positionSchema = z.object({
     .max(6, "종목코드는 6자리입니다."),
   underlyingCompanyName: z.string().min(1, "회사명을 입력해주세요."),
   underlyingMarket: z.enum(["KOSPI", "KOSDAQ"]),
-  mezzanineType: z.enum(["CB", "BW", "EB", "RCPS"]),
+  mezzanineType: z.enum(["CB", "BW", "EB", "RCPS", "COMMON"]),
   issueDate: z.string().optional(),
   investmentType: z.enum(["DIRECT", "INDIRECT"]),
   investmentAmount: optionalNumber((n) => n.positive("투자금액은 0보다 커야 합니다.")),

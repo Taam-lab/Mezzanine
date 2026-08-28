@@ -111,6 +111,7 @@ const COLUMNS: ColumnDef[] = [
       { value: "BW", label: "BW" },
       { value: "EB", label: "EB" },
       { value: "RCPS", label: "RCPS" },
+      { value: "COMMON", label: "보통주" },
     ],
   },
   {
