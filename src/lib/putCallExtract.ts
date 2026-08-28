@@ -191,13 +191,22 @@ export function extractPutCall(text: string): PutCallExtraction {
       result.putOptionEndDate = rows[rows.length - 1].to;
       result.putOptionSchedule = JSON.stringify(rows);
     } else {
-      // 2순위 폴백: 표가 없을 때 "조기상환청구기간" 뒤 날짜 목록에서 첫/마지막
-      const periodMatch = putSec.match(/조기상환\s*청구\s*기간[^\d]{0,50}/);
-      const scanStart = periodMatch ? periodMatch.index! + periodMatch[0].length : 0;
-      const nextSecRel = putSec.slice(scanStart).search(/\d{1,2}\.\s*(?:매도|콜|기타|이자|원금|납입)/);
-      const scanEnd = nextSecRel === -1 ? putSec.length : scanStart + nextSecRel;
+      // 2순위 폴백: 표 매칭 실패 시 "조기상환청구권 행사기간" 앵커부터 좁게 스캔.
+      // 콜 옵션과 대칭 구조 — 앵커 뒤 1500자 안 날짜를 sort 후 min/max.
+      const putAnchorRe = /조기상환청구권\s*(?:행사|청구)\s*기간|조기상환\s*청구\s*기간/;
+      const putAnchorMatch = putAnchorRe.exec(putSec);
+      const scanStart = putAnchorMatch
+        ? putAnchorMatch.index + putAnchorMatch[0].length
+        : 0;
+      const nextSecRel = putSec
+        .slice(scanStart)
+        .search(/\d{1,2}\.\s*(?:매도|콜|기타|이자|원금|납입)/);
+      const scanEnd =
+        nextSecRel === -1
+          ? Math.min(putSec.length, scanStart + 1500)
+          : Math.min(scanStart + nextSecRel, scanStart + 1500);
       const trimmed = putSec.slice(scanStart, scanEnd);
-      const dates = extractAllDates(trimmed);
+      const dates = extractAllDates(trimmed).sort();
       if (dates.length >= 1) result.putOptionStartDate = dates[0];
       if (dates.length >= 2) result.putOptionEndDate = dates[dates.length - 1];
     }
