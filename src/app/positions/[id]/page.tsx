@@ -162,6 +162,47 @@ export default function PositionDetailPage() {
   const [refreshingPrice, setRefreshingPrice] = useState(false);
   const [reparsing, setReparsing] = useState(false);
 
+  async function debugDisclosure(id: string) {
+    try {
+      const res = await fetch(`/api/positions/${id}/reparse?debug=true&t=${Date.now()}`, {
+        method: "POST",
+        cache: "no-store",
+      });
+      const data = await res.json();
+      const debugText = [
+        `=== 공시 파서 디버그 ===`,
+        `종목: ${data.assetName ?? ""}`,
+        `본문 총 ${data.bodyLength ?? "?"}자`,
+        ``,
+        `--- 파서 추출 결과 ---`,
+        JSON.stringify(data.extracted ?? {}, null, 2),
+        ``,
+        `--- 콜 섹션 (매도청구권부터 3500자) ---`,
+        data.debug?.callSection ?? "(없음)",
+        ``,
+        `--- 풋 섹션 (조기상환청구권부터 3500자) ---`,
+        data.debug?.putSection ?? "(없음)",
+      ].join("\n");
+      // 새 창에 텍스트 표시 (전체 선택·복사 편함)
+      const win = window.open("", "_blank", "width=900,height=700");
+      if (win) {
+        win.document.write(
+          `<pre style="white-space:pre-wrap;word-break:break-all;font-family:monospace;font-size:12px;padding:12px;">${debugText
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")}</pre>`,
+        );
+        win.document.title = `공시 디버그 - ${data.assetName ?? ""}`;
+      } else {
+        // 팝업 차단 시 clipboard fallback
+        await navigator.clipboard.writeText(debugText).catch(() => {});
+        alert("팝업이 차단됨. 클립보드에 복사됨.");
+      }
+    } catch (e) {
+      alert(`디버그 실패: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
   async function reparseDisclosure(id: string) {
     if (!confirm("저장된 원문 URL로 풋/콜 옵션 필드를 재파싱합니다. 계속?")) return;
     setReparsing(true);
@@ -623,14 +664,23 @@ export default function PositionDetailPage() {
                       <ExternalLink className="h-3 w-3" />
                       DART 공시 원문 보기
                     </a>
-                    <button
-                      onClick={() => reparseDisclosure(position.id)}
-                      disabled={reparsing}
-                      className="text-xs text-gray-500 hover:text-[#0A2A5E] disabled:opacity-50"
-                      title="파서 개선 후 저장된 원문으로 풋/콜 옵션 필드만 다시 파싱"
-                    >
-                      {reparsing ? "재파싱 중..." : "공시 재파싱 (풋/콜)"}
-                    </button>
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={() => debugDisclosure(position.id)}
+                        className="text-xs text-gray-500 hover:text-[#0A2A5E]"
+                        title="파서가 스캔하는 콜/풋 섹션 원문 텍스트를 새 창에 표시"
+                      >
+                        디버그 보기
+                      </button>
+                      <button
+                        onClick={() => reparseDisclosure(position.id)}
+                        disabled={reparsing}
+                        className="text-xs text-gray-500 hover:text-[#0A2A5E] disabled:opacity-50"
+                        title="파서 개선 후 저장된 원문으로 풋/콜 옵션 필드만 다시 파싱"
+                      >
+                        {reparsing ? "재파싱 중..." : "공시 재파싱 (풋/콜)"}
+                      </button>
+                    </div>
                   </div>
                 )}
               </CardContent>

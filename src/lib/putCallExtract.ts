@@ -83,49 +83,27 @@ export function extractPutCall(text: string): PutCallExtraction {
   // ─────────────────────────────────────────────
   // 콜옵션 (매도청구권)
   // ─────────────────────────────────────────────
-  const callIdx = findCallSectionStart(text);
+  // 콜옵션 앵커: "매도청구권 행사기간" (또는 무공백 "매도청구권행사기간")
+  // 이 텍스트 바로 뒤에 콜 옵션의 (from ~ to) 날짜가 오는 게 표준 구조.
+  // 다른 앵커(매매대금 등) 는 공시마다 유무가 달라서 이 표현 하나에 집중.
+  const callAnchorRe = /매도청구권\s*행사\s*기간/;
+  const callAnchorMatch = callAnchorRe.exec(text);
+  const callIdx = callAnchorMatch ? callAnchorMatch.index : findCallSectionStart(text);
   if (callIdx !== -1) {
-    // 콜 섹션 5000자 통째로 잡으면 뒤에 오는 풋(조기상환청구권) 표까지 흡수됨.
-    // 콜 옵션 표에만 나오는 강한 마커(매매대금/매매가액) 주변으로만 좁혀서 스캔.
-    const rawCall = text.slice(callIdx, callIdx + 5000);
-    // 매매대금 지급기일 표 (또는 매매가액 산정) 앵커
-    const anchorRe = /매매대금\s*지급\s*기일|매매가액|매매\s*일자/;
-    const anchorIdx = rawCall.search(anchorRe);
-    // 앵커 찾으면 그 앞뒤 2000자만 콜 스캔 범위. 못 찾으면 앞 2500자만 (풋 테이블 전에 끊기 좋음)
-    const callSec =
-      anchorIdx !== -1
-        ? rawCall.slice(Math.max(0, anchorIdx - 500), anchorIdx + 2000)
-        : rawCall.slice(0, 2500);
+    // 앵커 있으면 그 위치부터 1500자만 (일반적으로 콜 date 는 앵커 바로 뒤 100-500자 안).
+    // 앵커 없으면 매도청구권 섹션 시작부터 2500자.
+    const callSec = callAnchorMatch
+      ? text.slice(callIdx, callIdx + 1500)
+      : text.slice(callIdx, callIdx + 2500);
 
-    const rowRe = /(?:\d{1,3}|[제])\s*차\D{0,20}(\d{4})[년\-./\s]{1,3}(\d{1,2})[월\-./\s]{1,3}(\d{1,2})[일]?/g;
-    const rowDates: string[] = [];
-    let rm: RegExpExecArray | null;
-    while ((rm = rowRe.exec(callSec)) !== null) {
-      const iso = normalizeDate(rm[1], rm[2], rm[3]);
-      const mm = parseInt(rm[2], 10);
-      const dd = parseInt(rm[3], 10);
-      if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) rowDates.push(iso);
-    }
-
-    if (rowDates.length >= 1) {
-      // 오름차순 정렬 후 min/max 사용
-      const sorted = [...rowDates].sort();
+    // 앵커 뒤 첫 두 날짜 = (시작, 종료). 3개 이상이면 sort 후 min/max.
+    const dates = extractAllDates(callSec);
+    if (dates.length >= 2) {
+      const sorted = [...dates].sort();
       result.callOptionStartDate = sorted[0];
       result.callOptionEndDate = sorted[sorted.length - 1];
-    } else {
-      const paymentIdx = callSec.search(/매매대금\s*지급\s*기일|지급\s*기일|매매\s*일자/);
-      if (paymentIdx !== -1) {
-        const payWindow = callSec.slice(paymentIdx, paymentIdx + 2000);
-        const dates = extractAllDates(payWindow).sort();
-        if (dates.length >= 1) result.callOptionStartDate = dates[0];
-        if (dates.length >= 2) result.callOptionEndDate = dates[dates.length - 1];
-      } else {
-        const dates = extractAllDates(callSec).sort();
-        if (dates.length >= 2) {
-          result.callOptionStartDate = dates[0];
-          result.callOptionEndDate = dates[dates.length - 1];
-        }
-      }
+    } else if (dates.length === 1) {
+      result.callOptionStartDate = dates[0];
     }
 
     // 콜옵션 비율: "매도청구권 행사 범위 ... 발행가액의 N%"
