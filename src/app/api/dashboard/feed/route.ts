@@ -409,9 +409,19 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  return NextResponse.json({
-    news: allNews.slice(0, 30),
-    disclosures: allDisc.slice(0, 40),
-    alerts,
-  });
+  return NextResponse.json(
+    {
+      news: allNews.slice(0, 30),
+      disclosures: allDisc.slice(0, 40),
+      alerts,
+    },
+    {
+      headers: {
+        // Vercel Edge CDN 캐시: 같은 tickers 조합의 재요청은 90초간 lambda 실행 없이
+        // 엣지에서 즉시 반환. stale-while-revalidate 로 만료 직후에도 이전 응답을
+        // 먼저 주고 백그라운드 재검증 → 체감 로딩 0ms.
+        "Cache-Control": "public, s-maxage=90, stale-while-revalidate=300",
+      },
+    },
+  );
 }

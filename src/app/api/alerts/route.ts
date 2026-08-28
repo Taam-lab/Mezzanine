@@ -10,9 +10,16 @@ export const runtime = "nodejs";
  * DISCLOSURE 알림 노이즈 정리:
  *   - metadata:null → 이전 버전 (접수일 없음) — 사용자가 시각을 오독하므로 삭제
  *   - createdAt 3일 이상 지난 DISCLOSURE — 인박스는 실시간 트리거 용도, DART 에 원문 있음
- * 여러 진입점에서 호출되도록 헬퍼로 분리.
+ *
+ * 매 요청마다 DELETE 를 돌리면 조회 hot path 에 불필요한 write 가 끼어 응답이 느려지므로
+ * 프로세스당 10분에 한 번만 실행 (그 사이엔 no-op). 정확한 즉시성이 필요한 작업이 아님.
  */
+let lastCleanupAt = 0;
+const CLEANUP_INTERVAL_MS = 10 * 60 * 1000;
+
 async function cleanupStaleDisclosures(): Promise<void> {
+  if (Date.now() - lastCleanupAt < CLEANUP_INTERVAL_MS) return;
+  lastCleanupAt = Date.now();
   try {
     const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
     await prisma.alert.deleteMany({
@@ -47,8 +54,8 @@ export async function GET(req: NextRequest) {
   const page = parseInt(searchParams.get("page") || "1");
   const limit = parseInt(searchParams.get("limit") || "20");
 
-  // GET 진입 때에도 정리 (조회 시점마다 옛 노이즈 자동 정리 — 첫 GET 후 인박스 깔끔).
-  await cleanupStaleDisclosures();
+  // GET 진입 때에도 정리 — 단, 응답을 막지 않게 fire-and-forget (10분 스로틀).
+  cleanupStaleDisclosures().catch(() => {});
 
   if (countOnly) {
     const count = await prisma.alertUserStatus.count({

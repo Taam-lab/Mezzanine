@@ -21,7 +21,18 @@ export const maxDuration = 30;
  * "전환가액 조정" 공시가 있으면 회차를 확인 후 자동으로 currentConversionPrice 조정 +
  * ConversionPriceHistory 기록 + CRITICAL 알림 (텔레그램 발송).
  */
-export async function GET(_req: NextRequest) {
+// 프로세스 단위 스로틀: 여러 탭/기기가 동시에 대시보드를 열어도 lambda 하나당
+// 15분에 1번만 실제 스캔. (DART 스크래핑 + 종목별 순차 fetch 라 비용이 큼)
+let lastRunAt = 0;
+const RUN_INTERVAL_MS = 15 * 60 * 1000;
+
+export async function GET(req: NextRequest) {
+  const force = new URL(req.url).searchParams.get("force") === "true";
+  if (!force && Date.now() - lastRunAt < RUN_INTERVAL_MS) {
+    return NextResponse.json({ skipped: true, reason: "throttled" });
+  }
+  lastRunAt = Date.now();
+
   const apiKey = process.env.DART_API_KEY;
   const positions = await prisma.position.findMany({
     where: { isActive: true },

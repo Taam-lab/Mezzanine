@@ -213,11 +213,12 @@ export default function DashboardPage() {
         typeof window !== "undefined"
           ? sessionStorage.getItem("positionTickerNames")
           : null;
+      // 캐시버스터 없이 호출 — feed 응답은 s-maxage=90 CDN 캐시가 걸려 있어서
+      // 같은 URL 재요청은 엣지에서 즉시 반환됨 (강제 새로고침 때만 우회).
+      const feedBuster = forceRefresh ? `&t=${Date.now()}` : "";
       const preFeedPromise =
         hintedNameEntriesRaw && !forceRefresh
-          ? fetch(`/api/dashboard/feed?tickers=${hintedNameEntriesRaw}&t=${Date.now()}`, {
-              cache: "no-store",
-            })
+          ? fetch(`/api/dashboard/feed?tickers=${hintedNameEntriesRaw}`)
               .then((r) => r.json())
               .catch(() => null)
           : Promise.resolve(null);
@@ -385,9 +386,7 @@ export default function DashboardPage() {
       const preFeed = await preFeedPromise;
       const feedPromise: Promise<unknown> = preFeed
         ? Promise.resolve(preFeed)
-        : fetch(`/api/dashboard/feed?tickers=${tickerNameEntries}&t=${Date.now()}`, {
-            cache: "no-store",
-          })
+        : fetch(`/api/dashboard/feed?tickers=${tickerNameEntries}${feedBuster}`)
             .then((r) => r.json())
             .catch(() => null);
 
@@ -467,10 +466,14 @@ export default function DashboardPage() {
         .finally(() => setFeedsLoading(false));
 
       // 전환가액 조정 공시 스캔 (백그라운드 fire-and-forget).
-      // 회차 매칭되면 currentConversionPrice 자동 업데이트 + 이력 기록 + CRITICAL 알림.
-      fetch(`/api/dashboard/process-adjustments?t=${Date.now()}`, {
-        cache: "no-store",
-      }).catch(() => {});
+      // DART 스크래핑이 무거워서 30분에 1번만 트리거 (sessionStorage 타임스탬프).
+      const lastScan = Number(sessionStorage.getItem("adjustScanAt") ?? 0);
+      if (forceRefresh || Date.now() - lastScan > 30 * 60 * 1000) {
+        sessionStorage.setItem("adjustScanAt", String(Date.now()));
+        fetch(`/api/dashboard/process-adjustments?t=${Date.now()}`, {
+          cache: "no-store",
+        }).catch(() => {});
+      }
     } catch {
       setLoading(false);
       setFeedsLoading(false);
