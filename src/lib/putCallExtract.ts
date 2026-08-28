@@ -186,6 +186,24 @@ export function extractPutCall(text: string): PutCallExtraction {
       rows = sortedRows.filter((_, i) => keep.has(i));
     }
 
+    // 대안 표 형식: "지급일 FROM TO 전자등록금액" 3열 (SK케미칼 EB 스타일, N차 없음)
+    // 3개 연속 날짜 뒤에 "전자등록금액" 이 오는 패턴을 잡아 두번째·세번째 date 를 (from, to) 로.
+    if (rows.length === 0) {
+      const threeColRe =
+        /(\d{4})[년\-./\s]{1,3}(\d{1,2})[월\-./\s]{1,3}(\d{1,2})[일]?\s+(\d{4})[년\-./\s]{1,3}(\d{1,2})[월\-./\s]{1,3}(\d{1,2})[일]?\s+(\d{4})[년\-./\s]{1,3}(\d{1,2})[월\-./\s]{1,3}(\d{1,2})[일]?\s*(?:전자등록금액|권면총액|사채원금|사채금액)/g;
+      let m: RegExpExecArray | null;
+      while ((m = threeColRe.exec(putSec)) !== null) {
+        const from = normalizeDate(m[4], m[5], m[6]);
+        const to = normalizeDate(m[7], m[8], m[9]);
+        const fromMs = new Date(from).getTime();
+        const toMs = new Date(to).getTime();
+        if (!Number.isFinite(fromMs) || !Number.isFinite(toMs)) continue;
+        const days = Math.round((toMs - fromMs) / (1000 * 60 * 60 * 24));
+        if (days < 0 || days > 45) continue;
+        rows.push({ from, to });
+      }
+    }
+
     if (rows.length > 0) {
       result.putOptionStartDate = rows[0].from;
       result.putOptionEndDate = rows[rows.length - 1].to;
