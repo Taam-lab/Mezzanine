@@ -62,14 +62,15 @@ function extractAllDates(text: string): string[] {
  * 없으면 다음 매칭으로.
  */
 function findCallSectionStart(text: string): number {
-  const re = /매도청구권|Call\s*Option/gi;
-  const content = /매매대금|매매가액|매매대금\s*지급|지급\s*기일|행사\s*가액|\d\s*차\s+\d{4}/;
+  // 매도청구권(EB/CB) / 중도상환청구권(무학 EB) / Call Option 모두 커버.
+  const re = /매도청구권|중도상환청구권|Call\s*Option/gi;
+  const content = /매매대금|매매가액|매매대금\s*지급|지급\s*기일|행사\s*가액|중도상환|만기\s*\d+개월\s*전|\d\s*차\s+\d{4}/;
   let m: RegExpExecArray | null;
   let bestIdx = -1;
   while ((m = re.exec(text)) !== null) {
     const window = text.slice(m.index, m.index + 3000);
     if (content.test(window)) {
-      return m.index; // 첫 번째 실제 내용을 가진 매칭
+      return m.index;
     }
     if (bestIdx === -1) bestIdx = m.index;
   }
@@ -83,26 +84,42 @@ export function extractPutCall(text: string): PutCallExtraction {
   // ─────────────────────────────────────────────
   // 콜옵션 (매도청구권)
   // ─────────────────────────────────────────────
-  // 콜옵션 앵커: "매도청구권 행사기간" / "매도청구권 청구기간" (공백 유무 무관)
-  // 이 텍스트 바로 뒤에 콜 옵션의 (from ~ to) 날짜가 오는 게 표준 구조.
+  // 콜옵션 앵커: "매도청구권 행사/청구기간" 또는 "중도상환청구권" (무학 EB 스타일).
   const callAnchorRe = /매도청구권\s*(?:행사|청구)\s*기간/;
   const callAnchorMatch = callAnchorRe.exec(text);
   const callIdx = callAnchorMatch ? callAnchorMatch.index : findCallSectionStart(text);
   if (callIdx !== -1) {
-    // 앵커 있으면 그 위치부터 1500자만 (일반적으로 콜 date 는 앵커 바로 뒤 100-500자 안).
-    // 앵커 없으면 매도청구권 섹션 시작부터 2500자.
     const callSec = callAnchorMatch
       ? text.slice(callIdx, callIdx + 1500)
       : text.slice(callIdx, callIdx + 2500);
 
-    // 앵커 뒤 첫 두 날짜 = (시작, 종료). 3개 이상이면 sort 후 min/max.
-    const dates = extractAllDates(callSec);
-    if (dates.length >= 2) {
-      const sorted = [...dates].sort();
-      result.callOptionStartDate = sorted[0];
-      result.callOptionEndDate = sorted[sorted.length - 1];
-    } else if (dates.length === 1) {
-      result.callOptionStartDate = dates[0];
+    // 1순위: 산문형 "(YYYY년 MM월 DD일)부터 ... (YYYY년 MM월 DD일)까지" 패턴
+    //   무학처럼 "36개월이 되는 날(2028년 10월 28일)부터 만기 1개월 전일(2030년 9월 28일)까지"
+    //   같은 구조는 이 패턴으로 정확히 잡힘. 다른 dates (이사회결의일/납입일 등) 오탐 방지.
+    const proseMatch = callSec.match(
+      /\((\d{4})[년.\-/\s]+(\d{1,2})[월.\-/\s]+(\d{1,2})[일)]{1,2}\s*부터[^(]{0,150}?\((\d{4})[년.\-/\s]+(\d{1,2})[월.\-/\s]+(\d{1,2})[일)]{1,2}\s*(?:까지|의)/,
+    );
+    if (proseMatch) {
+      const from = `${proseMatch[1]}-${proseMatch[2].padStart(2, "0")}-${proseMatch[3].padStart(2, "0")}`;
+      const to = `${proseMatch[4]}-${proseMatch[5].padStart(2, "0")}-${proseMatch[6].padStart(2, "0")}`;
+      // 뒤집힘 방어
+      if (from > to) {
+        result.callOptionStartDate = to;
+        result.callOptionEndDate = from;
+      } else {
+        result.callOptionStartDate = from;
+        result.callOptionEndDate = to;
+      }
+    } else {
+      // 2순위: callSec 안 모든 날짜 sort → min/max
+      const dates = extractAllDates(callSec);
+      if (dates.length >= 2) {
+        const sorted = [...dates].sort();
+        result.callOptionStartDate = sorted[0];
+        result.callOptionEndDate = sorted[sorted.length - 1];
+      } else if (dates.length === 1) {
+        result.callOptionStartDate = dates[0];
+      }
     }
 
     // 콜옵션 비율: "매도청구권 행사 범위 ... 발행가액의 N%"
@@ -186,11 +203,11 @@ export function extractPutCall(text: string): PutCallExtraction {
       rows = sortedRows.filter((_, i) => keep.has(i));
     }
 
-    // 대안 표 형식: "지급일 FROM TO 전자등록금액" 3열 (SK케미칼 EB 스타일, N차 없음)
-    // 3개 연속 날짜 뒤에 "전자등록금액" 이 오는 패턴을 잡아 두번째·세번째 date 를 (from, to) 로.
+    // 대안 표 형식: "지급일 FROM TO {전자등록금액|N.NNN%}" 3열 (SK케미칼/무학 EB 스타일).
+    // 3개 연속 날짜 뒤에 마커 (전자등록금액/권면총액/사채원금/사채금액) 또는 백분율 이 오는 패턴.
     if (rows.length === 0) {
       const threeColRe =
-        /(\d{4})[년\-./\s]{1,3}(\d{1,2})[월\-./\s]{1,3}(\d{1,2})[일]?\s+(\d{4})[년\-./\s]{1,3}(\d{1,2})[월\-./\s]{1,3}(\d{1,2})[일]?\s+(\d{4})[년\-./\s]{1,3}(\d{1,2})[월\-./\s]{1,3}(\d{1,2})[일]?\s*(?:전자등록금액|권면총액|사채원금|사채금액)/g;
+        /(\d{4})[년\-./\s]{1,3}(\d{1,2})[월\-./\s]{1,3}(\d{1,2})[일]?\s+(\d{4})[년\-./\s]{1,3}(\d{1,2})[월\-./\s]{1,3}(\d{1,2})[일]?\s+(\d{4})[년\-./\s]{1,3}(\d{1,2})[월\-./\s]{1,3}(\d{1,2})[일]?\s*(?:전자등록금액|권면총액|사채원금|사채금액|[\d.]+\s*%)/g;
       let m: RegExpExecArray | null;
       while ((m = threeColRe.exec(putSec)) !== null) {
         const from = normalizeDate(m[4], m[5], m[6]);
