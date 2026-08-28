@@ -85,10 +85,17 @@ export function extractPutCall(text: string): PutCallExtraction {
   // ─────────────────────────────────────────────
   const callIdx = findCallSectionStart(text);
   if (callIdx !== -1) {
-    // 표가 만기까지 이어질 수 있고 서두 산문+표가 이어짐. 5000자 넉넉히.
-    // (narrowing 시도했다가 콜 필드를 전혀 못 뽑는 케이스 발생 — 대신 아래에서
-    //  날짜 정렬로 뒤집힘만 방지.)
-    const callSec = text.slice(callIdx, callIdx + 5000);
+    // 콜 섹션 5000자 통째로 잡으면 뒤에 오는 풋(조기상환청구권) 표까지 흡수됨.
+    // 콜 옵션 표에만 나오는 강한 마커(매매대금/매매가액) 주변으로만 좁혀서 스캔.
+    const rawCall = text.slice(callIdx, callIdx + 5000);
+    // 매매대금 지급기일 표 (또는 매매가액 산정) 앵커
+    const anchorRe = /매매대금\s*지급\s*기일|매매가액|매매\s*일자/;
+    const anchorIdx = rawCall.search(anchorRe);
+    // 앵커 찾으면 그 앞뒤 2000자만 콜 스캔 범위. 못 찾으면 앞 2500자만 (풋 테이블 전에 끊기 좋음)
+    const callSec =
+      anchorIdx !== -1
+        ? rawCall.slice(Math.max(0, anchorIdx - 500), anchorIdx + 2000)
+        : rawCall.slice(0, 2500);
 
     const rowRe = /(?:\d{1,3}|[제])\s*차\D{0,20}(\d{4})[년\-./\s]{1,3}(\d{1,2})[월\-./\s]{1,3}(\d{1,2})[일]?/g;
     const rowDates: string[] = [];
@@ -101,7 +108,7 @@ export function extractPutCall(text: string): PutCallExtraction {
     }
 
     if (rowDates.length >= 1) {
-      // 오름차순 정렬 후 min/max 사용 — 문서 등장 순서로 잡으면 종료 < 시작 뒤바뀜 발생.
+      // 오름차순 정렬 후 min/max 사용
       const sorted = [...rowDates].sort();
       result.callOptionStartDate = sorted[0];
       result.callOptionEndDate = sorted[sorted.length - 1];
