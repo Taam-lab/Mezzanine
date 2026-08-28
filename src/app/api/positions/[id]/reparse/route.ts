@@ -13,7 +13,9 @@ export const maxDuration = 30;
  * 풋/콜 관련 필드만 업데이트. 다른 필드 (전환가액, 만기 등) 는 건드리지 않음.
  * 파서 개선 후 옛 종목의 스케줄 정리에 사용.
  */
-export async function POST(_req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+  const { searchParams } = new URL(req.url);
+  const debug = searchParams.get("debug") === "true";
   const position = await prisma.position.findUnique({
     where: { id: params.id },
     select: { id: true, sourceDisclosureUrl: true, assetName: true },
@@ -76,6 +78,18 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
     const scheduleRows = extracted.putOptionSchedule
       ? (JSON.parse(extracted.putOptionSchedule) as unknown[]).length
       : 0;
+    // debug 모드: 파서가 실제로 스캔한 콜/풋 섹션 원문 텍스트를 반환.
+    // 원문을 못 보는 환경에서 정규식 튜닝 도구로 활용.
+    let debugData: Record<string, string> | undefined;
+    if (debug) {
+      const callIdx = bodyText.search(/매도청구권|Call\s*Option/i);
+      const putIdx = bodyText.search(/조기상환청구권|조기상환\s*청구\s*기간|Put\s*Option/i);
+      debugData = {
+        bodyPreview: bodyText.slice(0, 500),
+        callSection: callIdx !== -1 ? bodyText.slice(callIdx, callIdx + 3500) : "(not found)",
+        putSection: putIdx !== -1 ? bodyText.slice(putIdx, putIdx + 3500) : "(not found)",
+      };
+    }
     return NextResponse.json({
       ok: true,
       assetName: position.assetName,
@@ -83,6 +97,7 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
       scheduleRows,
       extracted, // 파서 원본 출력 — alert 에서 디버그 확인용
       updated,
+      debug: debugData,
     });
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
