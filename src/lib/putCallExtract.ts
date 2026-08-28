@@ -85,24 +85,10 @@ export function extractPutCall(text: string): PutCallExtraction {
   // ─────────────────────────────────────────────
   const callIdx = findCallSectionStart(text);
   if (callIdx !== -1) {
-    // 창 5000자 통째면 조기상환청구권/이자지급 표까지 삼켜서 시작·종료가 뒤바뀜.
-    // 다음 섹션 헤더까지만 잘라내되, 시작에서 200자 이후에 나오는 것만 인정
-    // (헤더 자체나 요약 문구 안의 언급으로부터 오탐 방지).
-    const rawCall = text.slice(callIdx, callIdx + 5000);
-    const nextSecPatterns = [
-      /조기상환청구권|조기상환\s*청구\s*기간|Put\s*Option/i,
-      /이자\s*지급/,
-      /사채(?:의)?\s*상환/,
-      /기타\s*투자\s*판단/,
-      /주요\s*경영\s*사항/,
-    ];
-    let endIdx = rawCall.length;
-    for (const p of nextSecPatterns) {
-      const searchIn = rawCall.slice(200);
-      const m = searchIn.search(p);
-      if (m !== -1) endIdx = Math.min(endIdx, 200 + m);
-    }
-    const callSec = rawCall.slice(0, endIdx);
+    // 표가 만기까지 이어질 수 있고 서두 산문+표가 이어짐. 5000자 넉넉히.
+    // (narrowing 시도했다가 콜 필드를 전혀 못 뽑는 케이스 발생 — 대신 아래에서
+    //  날짜 정렬로 뒤집힘만 방지.)
+    const callSec = text.slice(callIdx, callIdx + 5000);
 
     const rowRe = /(?:\d{1,3}|[제])\s*차\D{0,20}(\d{4})[년\-./\s]{1,3}(\d{1,2})[월\-./\s]{1,3}(\d{1,2})[일]?/g;
     const rowDates: string[] = [];
