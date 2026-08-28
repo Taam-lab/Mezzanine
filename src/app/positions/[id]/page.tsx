@@ -166,16 +166,29 @@ export default function PositionDetailPage() {
     if (!confirm("저장된 원문 URL로 풋/콜 옵션 필드를 재파싱합니다. 계속?")) return;
     setReparsing(true);
     try {
-      const res = await fetch(`/api/positions/${id}/reparse`, { method: "POST" });
+      const res = await fetch(`/api/positions/${id}/reparse?t=${Date.now()}`, {
+        method: "POST",
+        cache: "no-store",
+      });
       const data = await res.json();
       if (!res.ok) {
         alert(`재파싱 실패: ${data.error ?? res.status}`);
         return;
       }
-      alert(`재파싱 완료. 스케줄 회차 ${data.scheduleRows}건. 새로고침합니다.`);
-      // sessionStorage detail 캐시 무효화 후 리로드
+      const ex = data.extracted ?? {};
+      const summary = [
+        `재파싱 완료`,
+        `본문 ${data.bodyLength}자 · 풋 회차 ${data.scheduleRows}건`,
+        ``,
+        `[풋] ${ex.putOptionStartDate ?? "-"} ~ ${ex.putOptionEndDate ?? "-"} / ${ex.putOptionRate ?? "-"}%`,
+        `[콜] ${ex.callOptionStartDate ?? "-"} ~ ${ex.callOptionEndDate ?? "-"} / 비율 ${ex.callOptionRatio ?? "-"}% / 이율 ${ex.callOptionRate ?? "-"}%`,
+        ``,
+        `확인 후 새로고침합니다.`,
+      ].join("\n");
+      alert(summary);
+      // sessionStorage detail 캐시 무효화 + 캐시버스팅 리로드
       sessionStorage.removeItem(`positionDetail:${id}`);
-      window.location.reload();
+      window.location.href = window.location.pathname + `?t=${Date.now()}`;
     } catch (e) {
       alert(e instanceof Error ? e.message : "네트워크 오류");
     } finally {

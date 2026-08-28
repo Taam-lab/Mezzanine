@@ -48,17 +48,19 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
       extracted.callOptionEndDate,
     );
 
+    // 명시적 null 로 덮어쓰기: 파서가 콜 필드 추출 실패 (undefined) 시 옛 값이
+    // 남아 있으면 사용자가 재파싱 결과에 반영 안 됐다고 오해. null 로 clear.
     const updated = await prisma.position.update({
       where: { id: params.id },
       data: {
         putOptionStartDate: putStart ? new Date(putStart) : null,
         putOptionEndDate: putEnd ? new Date(putEnd) : null,
         putOptionSchedule: extracted.putOptionSchedule ?? null,
-        putOptionRate: extracted.putOptionRate ?? undefined,
-        callOptionStartDate: callStart ? new Date(callStart) : undefined,
-        callOptionEndDate: callEnd ? new Date(callEnd) : undefined,
-        callOptionRatio: extracted.callOptionRatio ?? undefined,
-        callOptionRate: extracted.callOptionRate ?? undefined,
+        putOptionRate: extracted.putOptionRate ?? null,
+        callOptionStartDate: callStart ? new Date(callStart) : null,
+        callOptionEndDate: callEnd ? new Date(callEnd) : null,
+        callOptionRatio: extracted.callOptionRatio ?? null,
+        callOptionRate: extracted.callOptionRate ?? null,
       },
       select: {
         putOptionStartDate: true,
@@ -79,6 +81,7 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
       assetName: position.assetName,
       bodyLength: bodyText.length,
       scheduleRows,
+      extracted, // 파서 원본 출력 — alert 에서 디버그 확인용
       updated,
     });
   } catch (err) {
