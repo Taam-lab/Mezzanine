@@ -198,6 +198,41 @@ export default function PositionsPage() {
     });
   }
 
+  const [reparsingAll, setReparsingAll] = useState(false);
+  async function reparseAllPositions() {
+    if (
+      !confirm(
+        "모든 활성 종목의 저장된 DART 원문을 다시 파싱해 풋/콜 옵션 필드를 갱신합니다. 종목 수에 따라 수십 초 걸릴 수 있음. 계속?",
+      )
+    )
+      return;
+    setReparsingAll(true);
+    try {
+      const res = await fetch("/api/positions/reparse-all", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(`전체 재파싱 실패: ${data.error ?? res.status}`);
+        return;
+      }
+      const failed = (data.results ?? [])
+        .filter((r: { ok: boolean }) => !r.ok)
+        .map((r: { assetName: string; error: string }) => `${r.assetName}: ${r.error}`)
+        .slice(0, 8)
+        .join("\n");
+      alert(
+        `전체 재파싱 완료 — 성공 ${data.ok}/${data.total}${
+          data.failed ? `, 실패 ${data.failed}` : ""
+        }${failed ? `\n\n실패 종목:\n${failed}` : ""}`,
+      );
+      sessionStorage.removeItem("positionsList");
+      window.location.reload();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "네트워크 오류");
+    } finally {
+      setReparsingAll(false);
+    }
+  }
+
   async function refreshLivePricesByTickers(tickers: string[]) {
     const uniq = Array.from(new Set(tickers.filter((t) => /^\d{6}$/.test(t))));
     if (uniq.length === 0) return;
@@ -421,6 +456,15 @@ export default function PositionsPage() {
                 시세 조회 실패
               </span>
             )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={reparseAllPositions}
+              disabled={reparsingAll || positions.length === 0}
+              title="모든 종목 저장된 DART 원문 재파싱 (풋/콜 옵션 필드만)"
+            >
+              {reparsingAll ? "재파싱 중..." : "전체 재파싱"}
+            </Button>
             <Button
               variant="outline"
               size="sm"

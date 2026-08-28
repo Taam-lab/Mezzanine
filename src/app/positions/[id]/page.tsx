@@ -576,6 +576,22 @@ export default function PositionDetailPage() {
                 ))}
 
                 {/* 풋옵션 회차별 스케줄 (파서가 저장한 raw 행 목록 — 디버깅/확인용) */}
+                {!position.putOptionSchedule && (
+                  <section>
+                    <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                      풋옵션 회차별 스케줄
+                    </h4>
+                    <div className="border border-dashed border-gray-200 rounded-lg px-4 py-6 text-center">
+                      <p className="text-xs text-gray-500 mb-2">
+                        저장된 스케줄이 없습니다. 우측 하단의{" "}
+                        <span className="font-medium text-[#0A2A5E]">
+                          "공시 재파싱 (풋/콜)"
+                        </span>{" "}
+                        버튼을 눌러 DART 원문에서 회차별 표를 추출하세요.
+                      </p>
+                    </div>
+                  </section>
+                )}
                 {position.putOptionSchedule &&
                   (() => {
                     let rows: Array<{ from: string; to: string }> = [];
