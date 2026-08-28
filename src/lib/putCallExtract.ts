@@ -83,10 +83,9 @@ export function extractPutCall(text: string): PutCallExtraction {
   // ─────────────────────────────────────────────
   // 콜옵션 (매도청구권)
   // ─────────────────────────────────────────────
-  // 콜옵션 앵커: "매도청구권 행사기간" (또는 무공백 "매도청구권행사기간")
+  // 콜옵션 앵커: "매도청구권 행사기간" / "매도청구권 청구기간" (공백 유무 무관)
   // 이 텍스트 바로 뒤에 콜 옵션의 (from ~ to) 날짜가 오는 게 표준 구조.
-  // 다른 앵커(매매대금 등) 는 공시마다 유무가 달라서 이 표현 하나에 집중.
-  const callAnchorRe = /매도청구권\s*행사\s*기간/;
+  const callAnchorRe = /매도청구권\s*(?:행사|청구)\s*기간/;
   const callAnchorMatch = callAnchorRe.exec(text);
   const callIdx = callAnchorMatch ? callAnchorMatch.index : findCallSectionStart(text);
   if (callIdx !== -1) {
