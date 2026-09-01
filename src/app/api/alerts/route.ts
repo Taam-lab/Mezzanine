@@ -33,6 +33,45 @@ async function cleanupStaleDisclosures(): Promise<void> {
   }
 }
 
+/** 오늘 KST 자정을 UTC Date 로 */
+function kstDayStart(): Date {
+  const kstNow = new Date(Date.now() + 9 * 3600_000);
+  return new Date(
+    Date.UTC(kstNow.getUTCFullYear(), kstNow.getUTCMonth(), kstNow.getUTCDate()) -
+      9 * 3600_000,
+  );
+}
+
+/**
+ * 오늘 생성된 PRICE_MOVE 알림 중 (positionId, severity) 가 같은 것이 여러 개면
+ * 가장 오래된 것만 남기고 삭제. 동시 POST 의 check-then-insert race 로 생긴
+ * 중복을 사후 정리.
+ */
+async function dedupeSweepPriceMoves(): Promise<void> {
+  try {
+    const todays = await prisma.alert.findMany({
+      where: { alertType: "PRICE_MOVE", createdAt: { gte: kstDayStart() } },
+      select: { id: true, positionId: true, severity: true, createdAt: true },
+      orderBy: { createdAt: "asc" },
+    });
+    const seen = new Set<string>();
+    const toDelete: string[] = [];
+    for (const a of todays) {
+      const key = `${a.positionId ?? "none"}:${a.severity}`;
+      if (seen.has(key)) toDelete.push(a.id);
+      else seen.add(key);
+    }
+    if (toDelete.length > 0) {
+      await prisma.$transaction([
+        prisma.alertUserStatus.deleteMany({ where: { alertId: { in: toDelete } } }),
+        prisma.alert.deleteMany({ where: { id: { in: toDelete } } }),
+      ]);
+    }
+  } catch {
+    // ignore
+  }
+}
+
 interface IncomingAlert {
   positionId?: string | null;
   alertType: string; // "PRICE_MOVE" | "DISCLOSURE" | ...
@@ -107,9 +146,10 @@ export async function POST(req: NextRequest) {
 
       // dedup 검사
       //   - sourceUrl 있으면 sourceUrl 로만 판단 (같은 rcpNo 는 절대 중복 발송 안 함)
-      //   - 없으면 (positionId, alertType, severity) + 시간창
-      //     (title 매칭은 안 씀 — 예: PRICE_MOVE 는 등락률 소수점 때문에 매번 title 이
-      //      달라져 dedup 이 안 걸리던 문제 해결)
+      //   - PRICE_MOVE 는 KST 당일 기준: 하한가에 하루 종일 붙어있어도 같은 날엔
+      //     같은 (positionId, severity) 알림을 다시 만들지 않음. (60분 윈도우로는
+      //     한 시간 지날 때마다 재발송돼 인박스가 도배되던 문제)
+      //   - 그 외 타입은 (positionId, alertType, severity) + dedupWithinMinutes 윈도우
       if (a.sourceUrl) {
         const existing = await prisma.alert.findFirst({
           where: { sourceUrl: a.sourceUrl },
@@ -117,13 +157,26 @@ export async function POST(req: NextRequest) {
         });
         if (existing) continue;
       } else if (a.positionId) {
-        const windowMs = (a.dedupWithinMinutes ?? 60) * 60_000;
+        let since: Date;
+        if (a.alertType === "PRICE_MOVE") {
+          // KST 자정 (UTC+9): 오늘 KST 날짜의 00:00 을 UTC 로 환산
+          const kstNow = new Date(Date.now() + 9 * 3600_000);
+          since = new Date(
+            Date.UTC(
+              kstNow.getUTCFullYear(),
+              kstNow.getUTCMonth(),
+              kstNow.getUTCDate(),
+            ) - 9 * 3600_000,
+          );
+        } else {
+          since = new Date(Date.now() - (a.dedupWithinMinutes ?? 60) * 60_000);
+        }
         const existing = await prisma.alert.findFirst({
           where: {
             positionId: a.positionId,
             alertType: a.alertType,
             severity: a.severity,
-            createdAt: { gte: new Date(Date.now() - windowMs) },
+            createdAt: { gte: since },
           },
           select: { id: true },
         });
@@ -153,6 +206,11 @@ export async function POST(req: NextRequest) {
         }).catch(() => {});
       }
     }
+
+    // Race 중복 정리: 동시 요청 두 개가 dedup 검사를 동시에 통과해 같은 알림을
+    // 두 번 넣는 경우가 있음 (unique 제약 없음). 오늘 생성된 PRICE_MOVE 를
+    // (positionId, severity) 로 그룹핑해 가장 오래된 것만 남기고 삭제.
+    dedupeSweepPriceMoves().catch(() => {});
 
     return NextResponse.json({ created });
   } catch (err) {
