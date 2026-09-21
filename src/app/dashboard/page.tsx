@@ -263,7 +263,8 @@ export default function DashboardPage() {
       for (const [t, q] of Object.entries(quotes)) {
         if (typeof q?.price === "number") priceMap[t] = q.price;
       }
-      setLivePrices(priceMap);
+      // 부분 실패 시 직전 값 유지 (풋 카드 패리티가 "-" 로 깜빡이지 않게).
+      setLivePrices((prev) => ({ ...prev, ...priceMap }));
       setStats({ totalPositions: positions.length, topRisers: [], topFallers: [] });
       setLastUpdated(new Date());
       setLoading(false);

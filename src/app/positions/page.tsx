@@ -84,7 +84,12 @@ function nextPutWindow(
 interface LiveQuote {
   price: number;
   changeRate: number;
+  /** 이 시세를 받아온 시각 (ms epoch). 부분 실패로 갱신이 밀린 값을 흐리게 표시하는 데 사용. */
+  at: number;
 }
+
+/** 이 시세가 마지막 갱신 이후 얼마나 지났는지 (분). 2주기(=2분) 넘으면 stale 로 본다. */
+const STALE_AFTER_MS = 2 * 60_000;
 
 type SortDir = "asc" | "desc";
 type ColKind = "text" | "enum" | "number" | "date";
@@ -253,18 +258,29 @@ export default function PositionsPage() {
       const quotes = (data as {
         quotes: Record<string, { price?: number; changeRate?: number; error?: string }>;
       }).quotes;
-      const next: Record<string, LiveQuote> = {};
+      const fetched: Record<string, LiveQuote> = {};
       const failed: string[] = [];
+      const now = Date.now();
       for (const [t, q] of Object.entries(quotes)) {
         if (typeof q.price === "number") {
-          next[t] = { price: q.price, changeRate: q.changeRate ?? 0 };
+          fetched[t] = { price: q.price, changeRate: q.changeRate ?? 0, at: now };
         } else if (q.error) {
           failed.push(`${t}: ${q.error}`);
         }
       }
-      setLivePrices(next);
-      if (failed.length > 0 && Object.keys(next).length === 0) {
+      // 부분 실패 시 직전 값을 지우지 않고 병합 — 13종목 중 2개만 실패해도
+      // 그 2행이 "-" 로 떨어져 화면이 깜빡이던 문제. 실패한 티커는 이전 시세를
+      // 그대로 유지하고, 오래된 값은 셀에서 회색 처리해 구분한다.
+      setLivePrices((prev) => ({ ...prev, ...fetched }));
+      if (failed.length === 0) {
+        setPriceError(null);
+      } else if (Object.keys(fetched).length === 0) {
         setPriceError(failed.slice(0, 3).join(" / "));
+      } else {
+        // 부분 실패도 조용히 넘기지 않고 건수를 표시
+        setPriceError(
+          `${Object.keys(quotes).length}종목 중 ${failed.length}건 조회 실패 (${failed[0]})`,
+        );
       }
     } catch (err) {
       setPriceError(err instanceof Error ? err.message : "네트워크 오류");
@@ -454,7 +470,9 @@ export default function PositionsPage() {
                 className="text-xs text-red-500 max-w-md truncate"
                 title={priceError}
               >
-                시세 조회 실패
+                {/* 부분 실패는 건수를 그대로 보여준다 — 조용히 "-" 만 남아
+                    원인을 알 수 없던 문제. 전체 실패만 통칭 메시지. */}
+                {priceError.includes("조회 실패") ? priceError : "시세 조회 실패"}
               </span>
             )}
             <Button
@@ -671,6 +689,8 @@ export default function PositionsPage() {
                     const live = livePrices[pos.underlyingTicker];
                     const price = live?.price;
                     const changeRate = live?.changeRate ?? 0;
+                    // 이번 갱신에서 실패해 직전 값이 유지된 경우 — 흐리게 표시
+                    const isStale = live ? Date.now() - live.at > STALE_AFTER_MS : false;
                     const isRise = changeRate > 0;
                     const isFall = changeRate < 0;
                     const parity =
@@ -713,7 +733,16 @@ export default function PositionsPage() {
                             ? formatKRW(Number(pos.investmentAmount))
                             : "-"}
                         </td>
-                        <td className="px-4 py-3 text-right tabular-nums text-sm font-medium text-gray-900">
+                        <td
+                          className={`px-4 py-3 text-right tabular-nums text-sm font-medium ${
+                            isStale ? "text-gray-400" : "text-gray-900"
+                          }`}
+                          title={
+                            isStale
+                              ? `${new Date(live!.at).toLocaleTimeString("ko-KR")} 기준 (갱신 실패로 직전 값 유지)`
+                              : undefined
+                          }
+                        >
                           {price ? formatKRW(price) : "-"}
                         </td>
                         <td className="px-4 py-3 text-right">

@@ -4,6 +4,10 @@ import { fetchNaverQuote, type NaverQuote } from "@/lib/naverPrice";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+// 재시도 + 청크 간격이 붙어 최악 wall-clock 이 늘었다.
+// 청크당 최악 ~12.5s (polling 4s + api.stock 4s + 지터 0.5s + 재시도 4s),
+// 2청크면 ~25s. 기본 한도에 걸리지 않게 여유를 둔다.
+export const maxDuration = 40;
 
 /**
  * GET /api/prices?tickers=A,B,C
@@ -30,10 +34,14 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "한 번에 최대 100개까지 조회 가능합니다." }, { status: 400 });
   }
 
-  // 네이버는 병렬 요청에 관대함. 15개 이하는 한 번에 다 던져도 문제없음.
-  const CHUNK = 15;
+  // 네이버는 IP 기준으로 버스트를 throttle 한다. Vercel 람다는 다른 고객과 IP 를
+  // 공유하므로 네이버가 체감하는 요청량은 우리 트래픽보다 크다.
+  // CHUNK 를 15 로 올렸더니 간헐적 실패가 늘어 8 로 되돌리고, 청크 사이에도 간격을 둔다.
+  const CHUNK = 8;
+  const CHUNK_GAP_MS = 150;
   const results: Array<NaverQuote | { ticker: string; error: string }> = [];
   for (let i = 0; i < tickers.length; i += CHUNK) {
+    if (i > 0) await new Promise((r) => setTimeout(r, CHUNK_GAP_MS));
     const chunk = tickers.slice(i, i + CHUNK);
     const settled = await Promise.allSettled(chunk.map((t) => fetchNaverQuote(t)));
     settled.forEach((r, idx) => {
