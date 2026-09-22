@@ -8,17 +8,17 @@ datasource db {
 }
 
 model User {
-  id          String    @id @default(cuid())
-  email       String    @unique
-  name        String
-  passwordHash String   @map("password_hash")
-  isApproved  Boolean   @default(false) @map("is_approved")
-  approvedAt  DateTime? @map("approved_at")
-  approvedBy  String?   @map("approved_by")
-  isActive    Boolean   @default(true) @map("is_active")
-  lastLoginAt DateTime? @map("last_login_at")
-  createdAt   DateTime  @default(now()) @map("created_at")
-  updatedAt   DateTime  @updatedAt @map("updated_at")
+  id           String    @id @default(cuid())
+  email        String    @unique
+  name         String
+  passwordHash String    @map("password_hash")
+  isApproved   Boolean   @default(false) @map("is_approved")
+  approvedAt   DateTime? @map("approved_at")
+  approvedBy   String?   @map("approved_by")
+  isActive     Boolean   @default(true) @map("is_active")
+  lastLoginAt  DateTime? @map("last_login_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
 
   positions            Position[]
   alertStatuses        AlertUserStatus[]
@@ -74,22 +74,25 @@ model Position {
   riskCheckResults       RiskCheckResult[]
   conversionPriceHistory ConversionPriceHistory[]
 
+  @@index([isActive, createdAt(sort: Desc)])
+  @@index([underlyingTicker, isActive])
   @@map("positions")
 }
 
 model ConversionPriceHistory {
-  id               String   @id @default(cuid())
-  positionId       String   @map("position_id")
-  oldPrice         Float    @map("old_price")
-  newPrice         Float    @map("new_price")
-  adjustmentReason String?  @map("adjustment_reason")
-  sourceDisclosureId String? @map("source_disclosure_id")
-  adjustedAt       DateTime @default(now()) @map("adjusted_at")
-  isAutomatic      Boolean  @default(false) @map("is_automatic")
+  id                 String   @id @default(cuid())
+  positionId         String   @map("position_id")
+  oldPrice           Float    @map("old_price")
+  newPrice           Float    @map("new_price")
+  adjustmentReason   String?  @map("adjustment_reason")
+  sourceDisclosureId String?  @map("source_disclosure_id")
+  adjustedAt         DateTime @default(now()) @map("adjusted_at")
+  isAutomatic        Boolean  @default(false) @map("is_automatic")
 
   position   Position    @relation(fields: [positionId], references: [id])
   disclosure Disclosure? @relation(fields: [sourceDisclosureId], references: [id])
 
+  @@index([positionId, adjustedAt])
   @@map("conversion_price_history")
 }
 
@@ -101,12 +104,14 @@ model Alert {
   title      String
   body       String?
   sourceUrl  String?  @map("source_url")
-  metadata   String?  // JSON string
+  metadata   String? // JSON string
   createdAt  DateTime @default(now()) @map("created_at")
 
-  position Position?         @relation(fields: [positionId], references: [id])
+  position     Position?         @relation(fields: [positionId], references: [id])
   userStatuses AlertUserStatus[]
 
+  @@index([positionId, createdAt(sort: Desc)])
+  @@index([createdAt(sort: Desc)])
   @@map("alerts")
 }
 
@@ -138,6 +143,7 @@ model NewsItem {
 
   position Position @relation(fields: [positionId], references: [id])
 
+  @@index([positionId, publishedAt(sort: Desc)])
   @@map("news_items")
 }
 
@@ -157,39 +163,42 @@ model Disclosure {
   position               Position                 @relation(fields: [positionId], references: [id])
   conversionPriceHistory ConversionPriceHistory[]
 
+  @@index([positionId, filedAt(sort: Desc)])
   @@map("disclosures")
 }
 
 model PriceSnapshot {
-  id          String   @id @default(cuid())
-  positionId  String   @map("position_id")
-  price       Float
-  changeRate  Float?   @map("change_rate")
-  volume      BigInt?
-  marketCap   BigInt?  @map("market_cap")
-  source      String   @default("naver")
-  snapshotAt  DateTime @default(now()) @map("snapshot_at")
+  id         String   @id @default(cuid())
+  positionId String   @map("position_id")
+  price      Float
+  changeRate Float?   @map("change_rate")
+  volume     BigInt?
+  marketCap  BigInt?  @map("market_cap")
+  source     String   @default("naver")
+  snapshotAt DateTime @default(now()) @map("snapshot_at")
 
   position Position @relation(fields: [positionId], references: [id])
 
+  @@index([positionId, snapshotAt(sort: Desc)])
   @@map("price_snapshots")
 }
 
 model FinancialSnapshot {
-  id               String   @id @default(cuid())
-  positionId       String   @map("position_id")
-  fiscalYear       Int      @map("fiscal_year")
-  fiscalQuarter    Int      @default(0) @map("fiscal_quarter")
-  revenue          BigInt?
-  operatingProfit  BigInt?  @map("operating_profit")
-  netIncome        BigInt?  @map("net_income")
-  totalEquity      BigInt?  @map("total_equity")
-  capital          BigInt?
-  auditOpinion     String?  @map("audit_opinion")
-  createdAt        DateTime @default(now()) @map("created_at")
+  id              String   @id @default(cuid())
+  positionId      String   @map("position_id")
+  fiscalYear      Int      @map("fiscal_year")
+  fiscalQuarter   Int      @default(0) @map("fiscal_quarter")
+  revenue         BigInt?
+  operatingProfit BigInt?  @map("operating_profit")
+  netIncome       BigInt?  @map("net_income")
+  totalEquity     BigInt?  @map("total_equity")
+  capital         BigInt?
+  auditOpinion    String?  @map("audit_opinion")
+  createdAt       DateTime @default(now()) @map("created_at")
 
   position Position @relation(fields: [positionId], references: [id])
 
+  @@index([positionId, fiscalYear(sort: Desc), fiscalQuarter(sort: Desc)], map: "financial_snapshots_position_id_year_quarter_idx")
   @@map("financial_snapshots")
 }
 
@@ -198,22 +207,23 @@ model RiskCheckResult {
   positionId String   @map("position_id")
   checkId    String   @map("check_id")
   status     String   @default("NORMAL")
-  value      String?  // JSON string
+  value      String? // JSON string
   checkedAt  DateTime @default(now()) @map("checked_at")
 
   position Position @relation(fields: [positionId], references: [id])
 
+  @@index([positionId, checkedAt(sort: Desc)])
   @@map("risk_check_results")
 }
 
 model NotificationSetting {
-  id          String  @id @default(cuid())
-  userId      String  @map("user_id")
-  positionId  String? @map("position_id")
-  alertType   String? @map("alert_type")
-  severity    String?
-  isEnabled   Boolean @default(true) @map("is_enabled")
-  channels    String  @default("web_push") // JSON array string
+  id         String  @id @default(cuid())
+  userId     String  @map("user_id")
+  positionId String? @map("position_id")
+  alertType  String? @map("alert_type")
+  severity   String?
+  isEnabled  Boolean @default(true) @map("is_enabled")
+  channels   String  @default("web_push") // JSON array string
 
   user User @relation(fields: [userId], references: [id])
 
@@ -221,12 +231,12 @@ model NotificationSetting {
 }
 
 model PushSubscription {
-  id           String   @id @default(cuid())
-  userId       String   @map("user_id")
-  endpoint     String   @unique
-  p256dhKey    String   @map("p256dh_key")
-  authKey      String   @map("auth_key")
-  createdAt    DateTime @default(now()) @map("created_at")
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  endpoint  String   @unique
+  p256dhKey String   @map("p256dh_key")
+  authKey   String   @map("auth_key")
+  createdAt DateTime @default(now()) @map("created_at")
 
   user User @relation(fields: [userId], references: [id])
 
@@ -236,7 +246,7 @@ model PushSubscription {
 model Integration {
   id              String    @id @default(cuid())
   serviceName     String    @unique @map("service_name")
-  credentials     String?   // AES-256 encrypted JSON
+  credentials     String? // AES-256 encrypted JSON
   isEnabled       Boolean   @default(false) @map("is_enabled")
   lastValidatedAt DateTime? @map("last_validated_at")
   createdBy       String?   @map("created_by")

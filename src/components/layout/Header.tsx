@@ -15,10 +15,35 @@ export function Header({ onMenuToggle }: Props = {}) {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
 
   useEffect(() => {
-    fetch("/api/alerts?unreadOnly=true&countOnly=true")
-      .then((r) => r.json())
-      .then((d) => setUnreadCount(d.count || 0))
-      .catch(() => {});
+    // 미확인 알림 뱃지는 첫 페인트에 필요 없다. 페이지의 주요 요청과 대역폭·
+    // 커넥션을 다투지 않도록 유휴 시점으로 미룬다.
+    // requestIdleCallback 미지원 브라우저(구형 Safari)는 setTimeout 폴백 —
+    // 가드 없이 쓰면 그쪽에서 뱃지가 영영 안 뜬다.
+    const run = () => {
+      fetch("/api/alerts?unreadOnly=true&countOnly=true")
+        .then((r) => r.json())
+        .then((d) => setUnreadCount(d.count || 0))
+        .catch(() => {});
+    };
+    const idle =
+      typeof window !== "undefined" &&
+      typeof (window as unknown as { requestIdleCallback?: unknown })
+        .requestIdleCallback === "function";
+    const handle = idle
+      ? (window as unknown as {
+          requestIdleCallback: (cb: () => void, o?: { timeout: number }) => number;
+        }).requestIdleCallback(run, { timeout: 2000 })
+      : (setTimeout(run, 300) as unknown as number);
+
+    // Header 는 라우트 이동마다 언마운트되므로 정리 필요
+    return () => {
+      if (idle) {
+        (window as unknown as { cancelIdleCallback: (h: number) => void })
+          .cancelIdleCallback(handle);
+      } else {
+        clearTimeout(handle);
+      }
+    };
   }, []);
 
   async function handleLogout() {

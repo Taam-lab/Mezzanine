@@ -8,16 +8,21 @@ export const runtime = "nodejs";
 export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
   const id = params.id;
 
-  // 8개 관계를 하나의 include로 묶으면 Prisma가 순차 서브쿼리로 처리하는 경우가 있어서
-  // 상세 페이지가 눈에 띄게 느렸다. 관계별로 independent query를 병렬로 실행.
+  // 관계별 independent query.
+  //
+  // financialSnapshots / alerts 는 상세 페이지가 전혀 읽지 않아 제거했다
+  // (page.tsx 853줄에 참조 0건). DATABASE_URL 의 connection_limit=1 때문에
+  // Promise.all 이 실제로는 순차 실행이라, 안 쓰는 관계 하나가 곧 왕복 한 번이다.
+  //
+  // 남은 관계에도 select 를 명시해 상세 페이지가 렌더하지 않는 컬럼 —
+  // 특히 disclosure.parsedData 의 JSON 블롭 (20행 × 파싱 결과 전체) — 을
+  // 응답에서 제외한다.
   const [
     position,
     priceSnapshots,
-    financialSnapshots,
     riskCheckResults,
     disclosures,
     newsItems,
-    alerts,
     conversionPriceHistory,
   ] = await Promise.all([
     prisma.position.findUnique({
@@ -26,13 +31,9 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
     }),
     prisma.priceSnapshot.findMany({
       where: { positionId: id },
+      select: { id: true, price: true, changeRate: true, snapshotAt: true },
       orderBy: { snapshotAt: "desc" },
       take: 30,
-    }),
-    prisma.financialSnapshot.findMany({
-      where: { positionId: id },
-      orderBy: [{ fiscalYear: "desc" }, { fiscalQuarter: "desc" }],
-      take: 8,
     }),
     prisma.riskCheckResult.findMany({
       where: { positionId: id },
@@ -41,6 +42,13 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
     }),
     prisma.disclosure.findMany({
       where: { positionId: id },
+      select: {
+        id: true,
+        reportName: true,
+        severity: true,
+        filedAt: true,
+        dartUrl: true,
+      },
       orderBy: { filedAt: "desc" },
       take: 20,
     }),
@@ -48,11 +56,6 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
       where: { positionId: id },
       orderBy: { publishedAt: "desc" },
       take: 20,
-    }),
-    prisma.alert.findMany({
-      where: { positionId: id },
-      orderBy: { createdAt: "desc" },
-      take: 10,
     }),
     prisma.conversionPriceHistory.findMany({
       where: { positionId: id },
@@ -65,11 +68,9 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   return NextResponse.json({
     ...position,
     priceSnapshots,
-    financialSnapshots,
     riskCheckResults,
     disclosures,
     newsItems,
-    alerts,
     conversionPriceHistory,
   });
 }

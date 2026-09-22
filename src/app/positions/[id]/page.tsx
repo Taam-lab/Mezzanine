@@ -23,13 +23,14 @@ import {
   formatPercent,
   formatDate,
   formatDateTime,
+  formatMonthDay,
   MEZZANINE_TYPE_LABEL,
   INVESTMENT_TYPE_LABEL,
   SEVERITY_LABEL,
   RISK_CHECK_LABELS,
 } from "@/lib/utils";
 import dynamic from "next/dynamic";
-import { format } from "date-fns";
+
 
 // recharts 는 ~110KB. 차트는 스크롤 아래에 있어 첫 페인트에 필요 없으므로
 // 초기 번들에서 빼고 필요할 때 받아온다 (상세 페이지 First Load JS 226KB -> 약 절반).
@@ -335,7 +336,7 @@ export default function PositionDetailPage() {
     .slice(0, 30)
     .reverse()
     .map((s) => ({
-      date: format(new Date(s.snapshotAt), "MM/dd"),
+      date: formatMonthDay(s.snapshotAt),
       price: s.price,
     }));
 

@@ -37,6 +37,20 @@ export function formatDateTime(date: Date | string | null | undefined): string {
   return d.toLocaleString("ko-KR");
 }
 
+/**
+ * 차트 x축용 "MM/DD". date-fns 의 format(d, "MM/dd") 를 대체하려고 만든 것으로,
+ * 저장소 전체에서 그 호출 한 곳 때문에 의존성을 들고 있을 이유가 없었다.
+ *
+ * 반드시 로컬 시간 기준이어야 한다 — getUTC* 나 toISOString().slice() 로 바꾸면
+ * 09시 이전 KST 스냅샷의 x축이 하루씩 밀린다.
+ * toLocaleDateString("ko-KR") 도 안 된다 ("09. 22." 형태라 표기가 달라짐).
+ */
+export function formatMonthDay(date: Date | string): string {
+  const d = typeof date === "string" ? new Date(date) : date;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(d.getMonth() + 1)}/${pad(d.getDate())}`;
+}
+
 export const MEZZANINE_TYPES = ["CB", "BW", "EB", "RCPS", "COMMON"] as const;
 export const MARKETS = ["KOSPI", "KOSDAQ"] as const;
 export const INVESTMENT_TYPES = ["DIRECT", "INDIRECT"] as const;

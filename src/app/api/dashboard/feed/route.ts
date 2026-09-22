@@ -1,9 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import {
-  fetchDartDisclosuresByCorpCode,
-  resolveCorpCodeByRcpNo,
-} from "@/lib/dartDisclosures";
+import { fetchDartDisclosuresByCorpCode } from "@/lib/dartDisclosures";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -192,14 +189,47 @@ async function fetchGoogleNews(ticker: string, companyName: string): Promise<Fee
   return items;
 }
 
+/**
+ * 티커 -> corpCode 맵. 요청당 한 번만 조회한다.
+ *
+ * 이전에는 fetchDartOrNaverDisclosures 안에서 티커마다 findFirst 를 돌려
+ * 13종목이면 13번의 DB 왕복이 각 티커의 DART 호출 앞에 직렬로 붙었다.
+ * (DATABASE_URL 의 connection_limit=1 때문에 Promise.all 로 감싸도 실제로는
+ *  순차 실행이라 그 13번이 그대로 누적된다.)
+ *
+ * 주의: 한 티커에 여러 포지션이 있을 수 있고, corpCode 가 채워진 행과
+ * sourceDisclosureUrl 이 있는 행이 서로 다를 수 있다. 임의의 첫 행을 쓰면
+ * corpCode 가 null 로 잡혀 조용히 느린 Naver 스크래핑으로 떨어지므로
+ * 둘을 각각 "값이 있는 행" 기준으로 고른다.
+ */
+async function loadCorpCodeMap(tickers: string[]): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  if (tickers.length === 0) return map;
+  try {
+    const rows = await prisma.position.findMany({
+      where: { underlyingTicker: { in: tickers }, isActive: true },
+      select: { underlyingTicker: true, corpCode: true },
+    });
+    for (const r of rows) {
+      if (r.corpCode && !map.has(r.underlyingTicker)) {
+        map.set(r.underlyingTicker, r.corpCode);
+      }
+    }
+  } catch {
+    // DB 문제 → 전부 Naver 폴백
+  }
+  return map;
+}
+
 // ─────────────────────────────────────────────
 // 공시: DART OpenAPI 우선 (corp_code 필요), 없으면 Naver 폴백
 // ─────────────────────────────────────────────
 
-/** DART list.json 기반. 티커의 corp_code 를 DB 에서 조회, 없으면 Naver 폴백. */
+/** DART list.json 기반. corpCode 는 호출측이 미리 조회해 넘긴다. */
 async function fetchDartOrNaverDisclosures(
   ticker: string,
   companyName: string,
+  corpCode: string | null,
 ): Promise<FeedItem[]> {
   const cacheKey = `disc:${ticker}`;
   const hit = getCached(disclosureCache, cacheKey);
@@ -207,43 +237,10 @@ async function fetchDartOrNaverDisclosures(
 
   const apiKey = process.env.DART_API_KEY;
   if (apiKey) {
-    // 해당 티커의 활성 포지션 중 하나에서 corp_code 조회
-    let corpCode: string | null = null;
-    try {
-      const pos = await prisma.position.findFirst({
-        where: { underlyingTicker: ticker, isActive: true, corpCode: { not: null } },
-        select: { corpCode: true },
-      });
-      corpCode = pos?.corpCode ?? null;
-
-      // 없으면 sourceDisclosureUrl 로 resolve + 저장
-      if (!corpCode) {
-        const posWithUrl = await prisma.position.findFirst({
-          where: {
-            underlyingTicker: ticker,
-            isActive: true,
-            sourceDisclosureUrl: { not: null },
-          },
-          select: { id: true, sourceDisclosureUrl: true },
-        });
-        if (posWithUrl?.sourceDisclosureUrl) {
-          const rcpMatch = posWithUrl.sourceDisclosureUrl.match(/rcpNo=(\d+)/i);
-          if (rcpMatch) {
-            const resolved = await resolveCorpCodeByRcpNo(rcpMatch[1], apiKey);
-            if (resolved) {
-              corpCode = resolved;
-              await prisma.position.updateMany({
-                where: { underlyingTicker: ticker, corpCode: null },
-                data: { corpCode: resolved },
-              });
-            }
-          }
-        }
-      }
-    } catch {
-      // DB 문제 → Naver 폴백
-    }
-
+    // corpCode 가 아직 없는 레거시 행은 그대로 Naver 폴백으로 떨어진다.
+    // resolveCorpCodeByRcpNo 백필을 여기서 돌리면 DART 페이지네이션 탐색이
+    // 페이지 로드를 막으므로, 백필은 등록 시점(parse-disclosure)과
+    // 스케줄 작업에 맡긴다.
     if (corpCode) {
       const dart = await fetchDartDisclosuresByCorpCode(corpCode, apiKey, 30);
       if (dart.length > 0) {
@@ -340,10 +337,11 @@ function classifyDisclosure(
 async function fetchOneTicker(
   ticker: string,
   companyName: string,
+  corpCode: string | null,
 ): Promise<{ news: FeedItem[]; disclosures: FeedItem[] }> {
   const [news, disclosures] = await Promise.all([
     fetchGoogleNews(ticker, companyName).catch(() => []),
-    fetchDartOrNaverDisclosures(ticker, companyName).catch(() => []),
+    fetchDartOrNaverDisclosures(ticker, companyName, corpCode).catch(() => []),
   ]);
   return { news, disclosures };
 }
@@ -371,8 +369,14 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ news: [], disclosures: [], alerts: [] });
   }
 
+  // 티커별 corpCode 를 한 번에 조회 — 이전에는 티커마다 findFirst 가
+  // 각 DART 호출 앞에 직렬로 붙었다.
+  const corpCodeMap = await loadCorpCodeMap(entries.map((e) => e.ticker));
+
   const results = await Promise.all(
-    entries.map((e) => fetchOneTicker(e.ticker, e.companyName)),
+    entries.map((e) =>
+      fetchOneTicker(e.ticker, e.companyName, corpCodeMap.get(e.ticker) ?? null),
+    ),
   );
 
   const allNews: FeedItem[] = [];
