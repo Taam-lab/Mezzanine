@@ -28,17 +28,19 @@ import {
   SEVERITY_LABEL,
   RISK_CHECK_LABELS,
 } from "@/lib/utils";
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  ReferenceLine,
-} from "recharts";
+import dynamic from "next/dynamic";
 import { format } from "date-fns";
+
+// recharts 는 ~110KB. 차트는 스크롤 아래에 있어 첫 페인트에 필요 없으므로
+// 초기 번들에서 빼고 필요할 때 받아온다 (상세 페이지 First Load JS 226KB -> 약 절반).
+const PriceChart = dynamic(() => import("@/components/charts/PriceChart"), {
+  ssr: false,
+  loading: () => (
+    <div className="h-[200px] flex items-center justify-center text-xs text-gray-400">
+      차트 불러오는 중...
+    </div>
+  ),
+});
 
 interface PositionDetail {
   id: string;
@@ -479,35 +481,10 @@ export default function PositionDetailPage() {
                   <CardTitle>주가 차트</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <ResponsiveContainer width="100%" height={200}>
-                    <LineChart data={chartData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                      <XAxis dataKey="date" tick={{ fontSize: 11 }} />
-                      <YAxis
-                        tick={{ fontSize: 11 }}
-                        tickFormatter={(v) => v.toLocaleString()}
-                        domain={["auto", "auto"]}
-                      />
-                      <Tooltip
-                        formatter={(v: unknown) => [(v as number).toLocaleString() + "원", "주가"]}
-                      />
-                      {position.currentConversionPrice && (
-                        <ReferenceLine
-                          y={position.currentConversionPrice}
-                          stroke="#FF6B35"
-                          strokeDasharray="4 4"
-                          label={{ value: "전환가", position: "right", fontSize: 10 }}
-                        />
-                      )}
-                      <Line
-                        type="monotone"
-                        dataKey="price"
-                        stroke="#0A2A5E"
-                        strokeWidth={2}
-                        dot={false}
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
+                  <PriceChart
+                    data={chartData}
+                    conversionPrice={position.currentConversionPrice}
+                  />
                 </CardContent>
               </Card>
             )}
