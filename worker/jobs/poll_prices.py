@@ -152,7 +152,7 @@ async def poll_prices_realtime():
         threshold = await get_price_threshold(session)
 
         result = await session.execute(
-            text("SELECT id, underlying_ticker, underlying_company_name FROM positions WHERE is_active = 1")
+            text("SELECT id, underlying_ticker, underlying_company_name FROM positions WHERE is_active = true")
         )
         positions = [{"id": r[0], "ticker": r[1], "company_name": r[2]} for r in result.fetchall()]
 
@@ -189,7 +189,7 @@ async def daily_price_close():
 
     async with AsyncSessionLocal() as session:
         result = await session.execute(
-            text("SELECT id, underlying_ticker, underlying_company_name FROM positions WHERE is_active = 1")
+            text("SELECT id, underlying_ticker, underlying_company_name FROM positions WHERE is_active = true")
         )
         positions = [{"id": r[0], "ticker": r[1], "company_name": r[2]} for r in result.fetchall()]
 

@@ -7,6 +7,14 @@ python-multipart==0.0.18
 apscheduler==3.10.4
 sqlalchemy==2.0.36
 aiosqlite==0.20.0
-psycopg2-binary==2.9.10
 python-dotenv==1.0.1
 pykrx==1.0.48
+
+# db.py 는 postgresql:// 를 postgresql+asyncpg:// 로 바꿔 create_async_engine 에 넘긴다.
+# 따라서 필요한 드라이버는 asyncpg 다 — psycopg2-binary 는 동기 드라이버라
+# async 엔진에서 쓸 수 없어 기동 즉시 ModuleNotFoundError('asyncpg') 로 죽었다.
+asyncpg==0.30.0
+
+# decrypt_util.py 의 from Crypto.Cipher import AES (integrations 자격증명 복호화).
+# 패키지명이 import 명과 달라서 빠져 있었다.
+pycryptodome==3.21.0

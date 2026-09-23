@@ -40,7 +40,7 @@ async def get_active_positions(session) -> list[dict]:
             SELECT id, underlying_ticker, underlying_company_name,
                    series_number, current_conversion_price
             FROM positions
-            WHERE is_active = 1
+            WHERE is_active = true
         """)
     )
     rows = result.fetchall()

@@ -1,0 +1,37 @@
+services:
+  - type: web
+    name: mezzanine-worker
+    runtime: docker
+    rootDir: worker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    # 스케줄러가 메모리에 있으므로 인스턴스가 늘면 같은 잡이 중복 실행된다.
+    # 반드시 1개로 고정.
+    numInstances: 1
+    healthCheckPath: /health
+    envVars:
+      # ── 반드시 수동으로 넣어야 하는 값 ──────────────────────────────
+      # DATABASE_URL: Vercel 의 값을 그대로 쓰면 안 된다.
+      #   Vercel 쪽은 Prisma 용이라 ?pgbouncer=true&connection_limit=1 이 붙는데,
+      #   워커는 asyncpg 를 쓰므로 그 쿼리 파라미터를 커넥션 인자로 해석하려다
+      #   TypeError: connect() got an unexpected keyword argument 'pgbouncer' 로 죽는다.
+      #   Supabase 의 Direct connection(포트 5432, 파라미터 없는 URL)을 넣을 것.
+      #   장수 프로세스라 풀러보다 직결이 맞기도 하다.
+      - key: DATABASE_URL
+        sync: false
+      # DART OpenAPI 키 (공시 폴링)
+      - key: DART_API_KEY
+        sync: false
+      # integrations 테이블의 자격증명 복호화용. 웹앱의 ENCRYPTION_KEY 와 반드시 동일해야
+      # 한다 — 다르면 decrypt_util 이 조용히 실패해 공시 잡이 자격증명을 못 읽는다.
+      - key: ENCRYPTION_KEY
+        sync: false
+
+      # ── 기본값 ────────────────────────────────────────────────────
+      # APScheduler cron 은 컨테이너 로컬 타임존을 따른다. main.py 의 daily_close 는
+      # hour=16 (장 마감 후) 기준이라, UTC 로 두면 KST 01:30 에 돈다.
+      - key: TZ
+        value: Asia/Seoul
+      # 시세·공시 폴링 주기(분)
+      - key: POLLING_INTERVAL
+        value: "5"
