@@ -144,19 +144,15 @@ export async function POST(req: NextRequest) {
     for (const a of alerts) {
       if (!a?.title || !a.alertType || !a.severity) continue;
 
-      // dedup 검사
-      //   - sourceUrl 있으면 sourceUrl 로만 판단 (같은 rcpNo 는 절대 중복 발송 안 함)
-      //   - PRICE_MOVE 는 KST 당일 기준: 하한가에 하루 종일 붙어있어도 같은 날엔
-      //     같은 (positionId, severity) 알림을 다시 만들지 않음. (60분 윈도우로는
-      //     한 시간 지날 때마다 재발송돼 인박스가 도배되던 문제)
-      //   - 그 외 타입은 (positionId, alertType, severity) + dedupWithinMinutes 윈도우
-      if (a.sourceUrl) {
-        const existing = await prisma.alert.findFirst({
-          where: { sourceUrl: a.sourceUrl },
-          select: { id: true },
-        });
-        if (existing) continue;
-      } else if (a.positionId) {
+      // dedup
+      //   - sourceUrl 이 있으면 DB 의 @@unique([alertType, sourceUrl]) 가 막는다.
+      //     앱에서 findFirst 로 먼저 확인하던 방식은 동시 요청 두 건이 모두
+      //     "없음" 을 보고 둘 다 INSERT 하는 race 를 못 막았다 (탭 2개면 재현).
+      //     아래 create 를 그대로 시도하고 P2002 가 나면 넘어간다.
+      //   - sourceUrl 이 없는 타입(PRICE_MOVE 등)은 제약을 걸 수 없으므로
+      //     기존 시간창 검사를 유지한다. PRICE_MOVE 는 KST 당일 기준 —
+      //     하한가에 하루 종일 붙어있어도 같은 날 같은 severity 는 한 번만.
+      if (!a.sourceUrl && a.positionId) {
         let since: Date;
         if (a.alertType === "PRICE_MOVE") {
           // KST 자정 (UTC+9): 오늘 KST 날짜의 00:00 을 UTC 로 환산
@@ -183,20 +179,34 @@ export async function POST(req: NextRequest) {
         if (existing) continue;
       }
 
-      await prisma.alert.create({
-        data: {
-          positionId: a.positionId ?? null,
-          alertType: a.alertType,
-          severity: a.severity,
-          title: a.title,
-          body: a.body ?? null,
-          sourceUrl: a.sourceUrl ?? null,
-          metadata: a.eventAt ? JSON.stringify({ eventAt: a.eventAt }) : null,
-        },
-      });
+      try {
+        await prisma.alert.create({
+          data: {
+            positionId: a.positionId ?? null,
+            alertType: a.alertType,
+            severity: a.severity,
+            title: a.title,
+            body: a.body ?? null,
+            sourceUrl: a.sourceUrl ?? null,
+            metadata: a.eventAt ? JSON.stringify({ eventAt: a.eventAt }) : null,
+          },
+        });
+      } catch (e) {
+        // P2002 = unique 위반 → 같은 공시가 이미 있음. 조용히 넘어간다.
+        // (경쟁 요청이 먼저 넣었거나, 이전 스캔에서 이미 넣은 경우)
+        if (
+          e &&
+          typeof e === "object" &&
+          (e as { code?: string }).code === "P2002"
+        ) {
+          continue;
+        }
+        throw e;
+      }
       created++;
 
-      // 텔레그램 발송 (CRITICAL/WARNING 만). 실패는 무시 — 알림 저장이 롤백되면 안 됨.
+      // 텔레그램 발송 (CRITICAL/WARNING 만). INSERT 가 성공한 건에 대해서만
+      // 보내므로 중복 발송이 생기지 않는다. 실패는 무시 — 저장이 롤백되면 안 됨.
       if (a.severity === "CRITICAL" || a.severity === "WARNING") {
         sendTelegramAlert({
           title: a.title,
@@ -207,9 +217,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Race 중복 정리: 동시 요청 두 개가 dedup 검사를 동시에 통과해 같은 알림을
-    // 두 번 넣는 경우가 있음 (unique 제약 없음). 오늘 생성된 PRICE_MOVE 를
-    // (positionId, severity) 로 그룹핑해 가장 오래된 것만 남기고 삭제.
+    // sourceUrl 이 없어 DB 제약으로 막을 수 없는 타입(PRICE_MOVE)의 race 정리.
     dedupeSweepPriceMoves().catch(() => {});
 
     return NextResponse.json({ created });

@@ -153,6 +153,31 @@ function toUiAlert(a: DbAlertItem): UiAlert {
 }
 
 /**
+ * 같은 사건을 가리키는 알림을 하나로 합친다.
+ *
+ * 한 공시가 두 경로로 들어온다: 피드 스크랩이 방금 만든 것과, 이전 스캔에서
+ * 이미 DB 에 저장돼 내려온 것. 키는 sourceUrl(공시의 rcpNo) 이고, 없으면
+ * 제목+심각도로 본다.
+ *
+ * 같은 키가 겹치면 id 가 있는 쪽(=DB 행)을 남긴다. 화면의 삭제 버튼이 id 로
+ * 동작하므로, 피드 쪽을 남기면 지울 수 없는 알림이 된다.
+ */
+function dedupeAlerts(list: UiAlert[]): UiAlert[] {
+  const byKey = new Map<string, UiAlert>();
+  for (const a of list) {
+    const key = a.url ? `url:${a.url}` : `t:${a.severity}:${a.title}`;
+    const prev = byKey.get(key);
+    if (!prev) {
+      byKey.set(key, a);
+      continue;
+    }
+    // 둘 중 id 가 있는 쪽 우선, 둘 다 있거나 둘 다 없으면 먼저 온 것 유지
+    if (!prev.id && a.id) byKey.set(key, a);
+  }
+  return Array.from(byKey.values());
+}
+
+/**
  * 대시보드. positions/alerts 는 서버 컴포넌트(page.tsx)가 DB 에서 직접 읽어
  * props 로 내려주므로 첫 화면에 요약 타일·풋 카드·알림이 이미 채워져 있다.
  * 클라이언트는 느린 외부 데이터(네이버 시세, 뉴스/공시 피드)만 이어서 붙인다.
@@ -474,9 +499,15 @@ export default function DashboardClient({
           }));
           setNews(feedData.news ?? []);
           setDisclosures(feedData.disclosures ?? []);
-          const mergedAlerts = [...priceAlerts, ...dbAlerts, ...disclosureAlerts].sort(
-            (a, b) => (a.isoDate < b.isoDate ? 1 : a.isoDate > b.isoDate ? -1 : 0),
-          );
+          // 피드에서 막 감지한 공시 알림과, 이전 스캔에서 이미 DB 에 저장된 같은
+          // 공시가 둘 다 목록에 들어가 한 건이 두 번 보였다 (날짜 형식이 달라서
+          // 티가 났다 — DB 쪽은 formatDateTime, 피드 쪽은 스크랩 원문 문자열).
+          // sourceUrl 로 합치고, id 가 있는 DB 쪽을 남긴다 (삭제 버튼이 id 를 쓴다).
+          const mergedAlerts = dedupeAlerts([
+            ...priceAlerts,
+            ...dbAlerts,
+            ...disclosureAlerts,
+          ]).sort((a, b) => (a.isoDate < b.isoDate ? 1 : a.isoDate > b.isoDate ? -1 : 0));
           setAlertList(mergedAlerts);
 
           // 세션 캐시 저장 (다음 진입시 즉시 렌더)

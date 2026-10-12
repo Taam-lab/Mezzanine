@@ -110,6 +110,7 @@ model Alert {
   position     Position?         @relation(fields: [positionId], references: [id])
   userStatuses AlertUserStatus[]
 
+  @@unique([alertType, sourceUrl])
   @@index([positionId, createdAt(sort: Desc)])
   @@index([createdAt(sort: Desc)])
   @@map("alerts")
