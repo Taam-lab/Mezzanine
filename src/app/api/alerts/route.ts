@@ -177,6 +177,25 @@ export async function POST(req: NextRequest) {
           select: { id: true },
         });
         if (existing) continue;
+
+        // 2차 방어: 완전히 같은 문구(=같은 등락률)가 48시간 안에 이미 나갔으면 스킵.
+        //
+        // 위의 "KST 당일" 창은 장중 등락률이 -6.54% -> -6.43% 로 흔들릴 때의
+        // 도배를 막지만, 자정을 넘기면 리셋된다. 장 시작 전 네이버는 직전 거래일
+        // 종가의 등락률을 그대로 주므로, 어제와 글자까지 똑같은 알림이 오늘
+        // 아침에 다시 만들어졌다. 수치가 동일하다는 건 새 사건이 아니라는 뜻이다.
+        //
+        // 공휴일처럼 클라이언트의 장중 검사(요일+시간)로 못 거르는 경우까지 여기서 막힌다.
+        const sameText = await prisma.alert.findFirst({
+          where: {
+            positionId: a.positionId,
+            alertType: a.alertType,
+            title: a.title,
+            createdAt: { gte: new Date(Date.now() - 48 * 3600_000) },
+          },
+          select: { id: true },
+        });
+        if (sameText) continue;
       }
 
       try {

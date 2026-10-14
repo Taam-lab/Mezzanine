@@ -153,6 +153,29 @@ function toUiAlert(a: DbAlertItem): UiAlert {
 }
 
 /**
+ * 지금이 한국 증시 정규장 시간인지 (평일 09:00~15:30 KST).
+ *
+ * 장 시작 전이나 마감 후에 네이버를 조회하면 직전 거래일의 종가와 그때의
+ * 등락률이 그대로 돌아온다. 그걸 실시간 시세로 믿고 알림을 만들면, 어제 -10%
+ * 하락한 종목이 오늘 아침 07:38 에 "새 급락 알림" 으로 다시 뜬다 (dedup 은
+ * KST 자정에 리셋되므로 매일 아침 반복됐다).
+ *
+ * 장중이 아니면 새 가격 알림을 만들지 않는다. 장중에 이미 저장된 알림은
+ * DB 에서 그대로 내려오므로 화면에서 사라지지는 않는다.
+ *
+ * 공휴일까지는 요일로 가릴 수 없어서, 서버 쪽에 동일 수치 재발송을 막는
+ * 2차 방어를 함께 뒀다 (api/alerts 의 title 기반 48시간 dedup).
+ */
+function isKoreanMarketOpen(now: Date): boolean {
+  // UTC 에 +9h 를 더해 KST 벽시계를 getUTC* 로 읽는다 (실행 환경 TZ 에 무관).
+  const kst = new Date(now.getTime() + 9 * 3600_000);
+  const day = kst.getUTCDay(); // 0=일, 6=토
+  if (day === 0 || day === 6) return false;
+  const minutes = kst.getUTCHours() * 60 + kst.getUTCMinutes();
+  return minutes >= 9 * 60 && minutes <= 15 * 60 + 30;
+}
+
+/**
  * 같은 사건을 가리키는 알림을 하나로 합친다.
  *
  * 한 공시가 두 경로로 들어온다: 피드 스크랩이 방금 만든 것과, 이전 스캔에서
@@ -402,7 +425,11 @@ export default function DashboardClient({
 
       const priceAlerts: UiAlert[] = [];
       const nowIso = new Date().toISOString();
+      // 장외 시간의 시세는 직전 거래일 종가다. 그걸로 알림을 만들면 어제 등락이
+      // 오늘 아침 새 알림으로 되풀이된다 — 장중에만 생성한다.
+      const marketOpen = isKoreanMarketOpen(new Date());
       for (const p of positions) {
+        if (!marketOpen) break;
         if (!p.isActive) continue;
         const q = quotes[p.underlyingTicker];
         const rate = q?.changeRate;
