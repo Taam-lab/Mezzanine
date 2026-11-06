@@ -11,40 +11,38 @@ function Shimmer({ className = "" }: { className?: string }) {
 
 export default function PositionsLoading() {
   return (
-    <>
-      <div className="space-y-5">
-        <div className="flex items-center justify-between">
-          <Shimmer className="h-6 w-28" />
-          <div className="flex items-center gap-2">
-            <Shimmer className="h-9 w-24" />
-            <Shimmer className="h-9 w-28" />
-            <Shimmer className="h-9 w-24" />
+    <div className="space-y-5">
+      <div className="flex items-center justify-between">
+        <Shimmer className="h-6 w-28" />
+        <div className="flex items-center gap-2">
+          <Shimmer className="h-9 w-24" />
+          <Shimmer className="h-9 w-28" />
+          <Shimmer className="h-9 w-24" />
+        </div>
+      </div>
+
+      {/* 검색 */}
+      <Shimmer className="h-11 w-full rounded-xl" />
+
+      {/* 표 골격 */}
+      <Card>
+        <div className="overflow-hidden">
+          <div className="border-b border-gray-100 bg-gray-50 px-4 py-3 flex gap-6">
+            {[0, 1, 2, 3, 4, 5].map((i) => (
+              <Shimmer key={i} className="h-3 flex-1" />
+            ))}
+          </div>
+          <div className="divide-y divide-gray-50">
+            {[0, 1, 2, 3, 4, 5, 6].map((i) => (
+              <div key={i} className="px-4 py-3 flex items-center gap-6">
+                {[0, 1, 2, 3, 4, 5].map((j) => (
+                  <Shimmer key={j} className="h-4 flex-1" />
+                ))}
+              </div>
+            ))}
           </div>
         </div>
-
-        {/* 검색 */}
-        <Shimmer className="h-11 w-full rounded-xl" />
-
-        {/* 표 골격 */}
-        <Card>
-          <div className="overflow-hidden">
-            <div className="border-b border-gray-100 bg-gray-50 px-4 py-3 flex gap-6">
-              {[0, 1, 2, 3, 4, 5].map((i) => (
-                <Shimmer key={i} className="h-3 flex-1" />
-              ))}
-            </div>
-            <div className="divide-y divide-gray-50">
-              {[0, 1, 2, 3, 4, 5, 6].map((i) => (
-                <div key={i} className="px-4 py-3 flex items-center gap-6">
-                  {[0, 1, 2, 3, 4, 5].map((j) => (
-                    <Shimmer key={j} className="h-4 flex-1" />
-                  ))}
-                </div>
-              ))}
-            </div>
-          </div>
-        </Card>
-      </div>
-    </>
+      </Card>
+    </div>
   );
 }

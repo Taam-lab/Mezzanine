@@ -466,371 +466,369 @@ export default function PositionsClient({
   }, [filtered, sortCol, sortDir]);
 
   return (
-    <>
-      <div className="space-y-5">
-        <div className="flex items-center justify-between">
-          <h1 className="text-xl font-bold text-gray-900">보유 종목</h1>
-          <div className="flex items-center gap-2">
-            {priceError && (
-              <span
-                className="text-xs text-red-500 max-w-md truncate"
-                title={priceError}
-              >
-                {/* 부분 실패는 건수를 그대로 보여준다 — 조용히 "-" 만 남아
-                    원인을 알 수 없던 문제. 전체 실패만 통칭 메시지. */}
-                {priceError.includes("조회 실패") ? priceError : "시세 조회 실패"}
-              </span>
+    <div className="space-y-5">
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl font-bold text-gray-900">보유 종목</h1>
+        <div className="flex items-center gap-2">
+          {priceError && (
+            <span
+              className="text-xs text-red-500 max-w-md truncate"
+              title={priceError}
+            >
+              {/* 부분 실패는 건수를 그대로 보여준다 — 조용히 "-" 만 남아
+                  원인을 알 수 없던 문제. 전체 실패만 통칭 메시지. */}
+              {priceError.includes("조회 실패") ? priceError : "시세 조회 실패"}
+            </span>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={reparseAllPositions}
+            disabled={reparsingAll || positions.length === 0}
+            title="모든 종목 저장된 DART 원문 재파싱 (풋/콜 옵션 필드만)"
+          >
+            {reparsingAll ? "재파싱 중..." : "전체 재파싱"}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => refreshLivePricesByTickers(positions.map((p) => p.underlyingTicker))}
+            disabled={refreshing || positions.length === 0}
+            title="실시간 시세 새로고침"
+          >
+            {refreshing ? "새로고침 중..." : "시세 새로고침"}
+          </Button>
+          <Link href="/positions/new">
+            <Button variant="primary" size="sm">
+              <Plus className="h-4 w-4" />
+              종목 등록
+            </Button>
+          </Link>
+        </div>
+      </div>
+
+      {/* 검색 */}
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+        <input
+          type="text"
+          placeholder="종목명, 회사명, 종목코드 검색..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="w-full pl-9 pr-4 py-2.5 text-sm border border-gray-200 rounded-xl bg-white focus:outline-none focus:border-[#0A2A5E] focus:ring-1 focus:ring-[#0A2A5E]"
+        />
+      </div>
+
+      {loading ? (
+        <div className="text-center py-12 text-sm text-gray-400">불러오는 중...</div>
+      ) : sorted.length === 0 ? (
+        <Card className="border-dashed border-2 border-gray-200">
+          <div className="text-center py-12">
+            <p className="text-gray-500 mb-4">
+              {search || Object.keys(filters).length > 0
+                ? "검색/필터 결과가 없습니다."
+                : "등록된 종목이 없습니다."}
+            </p>
+            {!search && Object.keys(filters).length === 0 && (
+              <Link href="/positions/new">
+                <Button variant="primary">
+                  <Plus className="h-4 w-4" />
+                  첫 번째 종목 등록하기
+                </Button>
+              </Link>
             )}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={reparseAllPositions}
-              disabled={reparsingAll || positions.length === 0}
-              title="모든 종목 저장된 DART 원문 재파싱 (풋/콜 옵션 필드만)"
-            >
-              {reparsingAll ? "재파싱 중..." : "전체 재파싱"}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => refreshLivePricesByTickers(positions.map((p) => p.underlyingTicker))}
-              disabled={refreshing || positions.length === 0}
-              title="실시간 시세 새로고침"
-            >
-              {refreshing ? "새로고침 중..." : "시세 새로고침"}
-            </Button>
-            <Link href="/positions/new">
-              <Button variant="primary" size="sm">
-                <Plus className="h-4 w-4" />
-                종목 등록
-              </Button>
-            </Link>
           </div>
-        </div>
-
-        {/* 검색 */}
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-          <input
-            type="text"
-            placeholder="종목명, 회사명, 종목코드 검색..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-9 pr-4 py-2.5 text-sm border border-gray-200 rounded-xl bg-white focus:outline-none focus:border-[#0A2A5E] focus:ring-1 focus:ring-[#0A2A5E]"
-          />
-        </div>
-
-        {loading ? (
-          <div className="text-center py-12 text-sm text-gray-400">불러오는 중...</div>
-        ) : sorted.length === 0 ? (
-          <Card className="border-dashed border-2 border-gray-200">
-            <div className="text-center py-12">
-              <p className="text-gray-500 mb-4">
-                {search || Object.keys(filters).length > 0
-                  ? "검색/필터 결과가 없습니다."
-                  : "등록된 종목이 없습니다."}
-              </p>
-              {!search && Object.keys(filters).length === 0 && (
-                <Link href="/positions/new">
-                  <Button variant="primary">
-                    <Plus className="h-4 w-4" />
-                    첫 번째 종목 등록하기
-                  </Button>
-                </Link>
-              )}
-            </div>
-          </Card>
-        ) : (
-          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead ref={headerRef}>
-                  <tr className="border-b border-gray-100 bg-gray-50">
-                    {COLUMNS.map((col) => {
-                      const filterActive =
-                        (typeof filters[col.key] === "string" &&
-                          (filters[col.key] as string).trim().length > 0) ||
-                        (Array.isArray(filters[col.key]) &&
-                          (filters[col.key] as string[]).length > 0);
-                      const isSorted = sortCol === col.key;
-                      const alignClass =
-                        col.align === "right"
-                          ? "justify-end"
-                          : col.align === "center"
-                            ? "justify-center"
-                            : "justify-start";
-                      const canFilter = col.kind === "text" || col.kind === "enum";
-                      return (
-                        <th
-                          key={col.key}
-                          className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide relative whitespace-nowrap"
-                        >
-                          <div className={`flex items-center gap-1 ${alignClass}`}>
+        </Card>
+      ) : (
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead ref={headerRef}>
+                <tr className="border-b border-gray-100 bg-gray-50">
+                  {COLUMNS.map((col) => {
+                    const filterActive =
+                      (typeof filters[col.key] === "string" &&
+                        (filters[col.key] as string).trim().length > 0) ||
+                      (Array.isArray(filters[col.key]) &&
+                        (filters[col.key] as string[]).length > 0);
+                    const isSorted = sortCol === col.key;
+                    const alignClass =
+                      col.align === "right"
+                        ? "justify-end"
+                        : col.align === "center"
+                          ? "justify-center"
+                          : "justify-start";
+                    const canFilter = col.kind === "text" || col.kind === "enum";
+                    return (
+                      <th
+                        key={col.key}
+                        className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide relative whitespace-nowrap"
+                      >
+                        <div className={`flex items-center gap-1 ${alignClass}`}>
+                          <button
+                            type="button"
+                            onClick={() => toggleSort(col.key)}
+                            className="flex items-center gap-1 hover:text-[#0A2A5E]"
+                            title="클릭하여 정렬"
+                          >
+                            <span>{col.label}</span>
+                            {isSorted ? (
+                              sortDir === "asc" ? (
+                                <ArrowUp className="h-3 w-3 text-[#0A2A5E]" />
+                              ) : (
+                                <ArrowDown className="h-3 w-3 text-[#0A2A5E]" />
+                              )
+                            ) : (
+                              <ArrowUpDown className="h-3 w-3 text-gray-300" />
+                            )}
+                          </button>
+                          {canFilter && (
                             <button
                               type="button"
-                              onClick={() => toggleSort(col.key)}
-                              className="flex items-center gap-1 hover:text-[#0A2A5E]"
-                              title="클릭하여 정렬"
+                              onClick={() =>
+                                setOpenFilter(openFilter === col.key ? null : col.key)
+                              }
+                              className={`p-0.5 rounded hover:bg-gray-200 ${
+                                filterActive ? "text-[#0A2A5E]" : "text-gray-300"
+                              }`}
+                              title="필터"
                             >
-                              <span>{col.label}</span>
-                              {isSorted ? (
-                                sortDir === "asc" ? (
-                                  <ArrowUp className="h-3 w-3 text-[#0A2A5E]" />
-                                ) : (
-                                  <ArrowDown className="h-3 w-3 text-[#0A2A5E]" />
-                                )
-                              ) : (
-                                <ArrowUpDown className="h-3 w-3 text-gray-300" />
-                              )}
+                              <Filter className="h-3 w-3" />
                             </button>
-                            {canFilter && (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setOpenFilter(openFilter === col.key ? null : col.key)
-                                }
-                                className={`p-0.5 rounded hover:bg-gray-200 ${
-                                  filterActive ? "text-[#0A2A5E]" : "text-gray-300"
-                                }`}
-                                title="필터"
-                              >
-                                <Filter className="h-3 w-3" />
-                              </button>
+                          )}
+                        </div>
+
+                        {openFilter === col.key && canFilter && (
+                          <div className="absolute top-full mt-1 left-0 z-40 min-w-[180px] bg-white border border-gray-200 rounded-lg shadow-lg p-3 normal-case font-normal">
+                            {col.kind === "text" ? (
+                              <div className="space-y-2">
+                                <input
+                                  type="text"
+                                  autoFocus
+                                  value={(filters[col.key] as string) ?? ""}
+                                  onChange={(e) =>
+                                    setFilters((prev) => ({
+                                      ...prev,
+                                      [col.key]: e.target.value,
+                                    }))
+                                  }
+                                  placeholder="포함할 텍스트..."
+                                  className="w-full px-2 py-1.5 text-xs border border-gray-200 rounded focus:outline-none focus:border-[#0A2A5E]"
+                                />
+                                <div className="flex justify-between gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => clearFilter(col.key)}
+                                    className="text-xs text-gray-500 hover:text-gray-700"
+                                  >
+                                    필터 해제
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setOpenFilter(null)}
+                                    className="text-xs text-[#0A2A5E] font-medium"
+                                  >
+                                    닫기
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="space-y-1.5">
+                                {col.enumOptions!.map((opt) => {
+                                  const arr = (filters[col.key] as string[]) ?? [];
+                                  const checked = arr.includes(opt.value);
+                                  return (
+                                    <label
+                                      key={opt.value}
+                                      className="flex items-center gap-2 text-xs cursor-pointer hover:bg-gray-50 px-1 py-0.5 rounded"
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={checked}
+                                        onChange={(e) => {
+                                          setFilters((prev) => {
+                                            const cur = (prev[col.key] as string[]) ?? [];
+                                            const next = e.target.checked
+                                              ? [...cur, opt.value]
+                                              : cur.filter((v) => v !== opt.value);
+                                            const clone = { ...prev };
+                                            if (next.length === 0) delete clone[col.key];
+                                            else clone[col.key] = next;
+                                            return clone;
+                                          });
+                                        }}
+                                        className="rounded accent-[#0A2A5E]"
+                                      />
+                                      <span>{opt.label}</span>
+                                    </label>
+                                  );
+                                })}
+                                <div className="flex justify-between gap-2 pt-2 border-t border-gray-100">
+                                  <button
+                                    type="button"
+                                    onClick={() => clearFilter(col.key)}
+                                    className="text-xs text-gray-500 hover:text-gray-700"
+                                  >
+                                    필터 해제
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setOpenFilter(null)}
+                                    className="text-xs text-[#0A2A5E] font-medium"
+                                  >
+                                    닫기
+                                  </button>
+                                </div>
+                              </div>
                             )}
                           </div>
-
-                          {openFilter === col.key && canFilter && (
-                            <div className="absolute top-full mt-1 left-0 z-40 min-w-[180px] bg-white border border-gray-200 rounded-lg shadow-lg p-3 normal-case font-normal">
-                              {col.kind === "text" ? (
-                                <div className="space-y-2">
-                                  <input
-                                    type="text"
-                                    autoFocus
-                                    value={(filters[col.key] as string) ?? ""}
-                                    onChange={(e) =>
-                                      setFilters((prev) => ({
-                                        ...prev,
-                                        [col.key]: e.target.value,
-                                      }))
-                                    }
-                                    placeholder="포함할 텍스트..."
-                                    className="w-full px-2 py-1.5 text-xs border border-gray-200 rounded focus:outline-none focus:border-[#0A2A5E]"
-                                  />
-                                  <div className="flex justify-between gap-2">
-                                    <button
-                                      type="button"
-                                      onClick={() => clearFilter(col.key)}
-                                      className="text-xs text-gray-500 hover:text-gray-700"
-                                    >
-                                      필터 해제
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => setOpenFilter(null)}
-                                      className="text-xs text-[#0A2A5E] font-medium"
-                                    >
-                                      닫기
-                                    </button>
-                                  </div>
-                                </div>
-                              ) : (
-                                <div className="space-y-1.5">
-                                  {col.enumOptions!.map((opt) => {
-                                    const arr = (filters[col.key] as string[]) ?? [];
-                                    const checked = arr.includes(opt.value);
-                                    return (
-                                      <label
-                                        key={opt.value}
-                                        className="flex items-center gap-2 text-xs cursor-pointer hover:bg-gray-50 px-1 py-0.5 rounded"
-                                      >
-                                        <input
-                                          type="checkbox"
-                                          checked={checked}
-                                          onChange={(e) => {
-                                            setFilters((prev) => {
-                                              const cur = (prev[col.key] as string[]) ?? [];
-                                              const next = e.target.checked
-                                                ? [...cur, opt.value]
-                                                : cur.filter((v) => v !== opt.value);
-                                              const clone = { ...prev };
-                                              if (next.length === 0) delete clone[col.key];
-                                              else clone[col.key] = next;
-                                              return clone;
-                                            });
-                                          }}
-                                          className="rounded accent-[#0A2A5E]"
-                                        />
-                                        <span>{opt.label}</span>
-                                      </label>
-                                    );
-                                  })}
-                                  <div className="flex justify-between gap-2 pt-2 border-t border-gray-100">
-                                    <button
-                                      type="button"
-                                      onClick={() => clearFilter(col.key)}
-                                      className="text-xs text-gray-500 hover:text-gray-700"
-                                    >
-                                      필터 해제
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => setOpenFilter(null)}
-                                      className="text-xs text-[#0A2A5E] font-medium"
-                                    >
-                                      닫기
-                                    </button>
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </th>
-                      );
-                    })}
-                    <th className="px-2 py-3"></th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-50">
-                  {sorted.map((pos) => {
-                    const live = livePrices[pos.underlyingTicker];
-                    const price = live?.price;
-                    const changeRate = live?.changeRate ?? 0;
-                    // 이번 갱신에서 실패해 직전 값이 유지된 경우 — 흐리게 표시
-                    const isStale = live ? Date.now() - live.at > STALE_AFTER_MS : false;
-                    const isRise = changeRate > 0;
-                    const isFall = changeRate < 0;
-                    const parity =
-                      price && pos.currentConversionPrice
-                        ? (price / pos.currentConversionPrice) * 100
-                        : null;
-
-                    return (
-                      <tr
-                        key={pos.id}
-                        className="hover:bg-blue-50/30 transition-colors cursor-pointer"
-                        onClick={() => (window.location.href = `/positions/${pos.id}`)}
-                      >
-                        <td className="px-4 py-3">
-                          <div>
-                            <p className="font-medium text-gray-900">{pos.assetName}</p>
-                            {pos.bondCode && (
-                              <p className="text-xs text-gray-400">{pos.bondCode}</p>
-                            )}
-                          </div>
-                        </td>
-                        <td className="px-4 py-3">
-                          <div>
-                            <p className="font-medium text-gray-900">{pos.underlyingCompanyName}</p>
-                            <p className="text-xs text-gray-400">
-                              {pos.underlyingTicker} · {pos.underlyingMarket}
-                            </p>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          <Badge variant="neutral">{pos.mezzanineType}</Badge>
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          <span className="text-xs text-gray-600">
-                            {INVESTMENT_TYPE_LABEL[pos.investmentType] || pos.investmentType}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-right tabular-nums text-sm text-gray-900">
-                          {pos.investmentAmount
-                            ? formatKRW(Number(pos.investmentAmount))
-                            : "-"}
-                        </td>
-                        <td
-                          className={`px-4 py-3 text-right tabular-nums text-sm font-medium ${
-                            isStale ? "text-gray-400" : "text-gray-900"
-                          }`}
-                          title={
-                            isStale
-                              ? `${new Date(live!.at).toLocaleTimeString("ko-KR")} 기준 (갱신 실패로 직전 값 유지)`
-                              : undefined
-                          }
-                        >
-                          {price ? formatKRW(price) : "-"}
-                        </td>
-                        <td className="px-4 py-3 text-right">
-                          {price !== undefined ? (
-                            <span
-                              className={`tabular-nums text-sm font-semibold flex items-center justify-end gap-0.5 ${
-                                isRise ? "text-rise" : isFall ? "text-fall" : "text-gray-500"
-                              }`}
-                            >
-                              {isRise ? (
-                                <TrendingUp className="h-3 w-3" />
-                              ) : isFall ? (
-                                <TrendingDown className="h-3 w-3" />
-                              ) : null}
-                              {formatPercent(changeRate)}
-                            </span>
-                          ) : (
-                            <span className="text-gray-400 text-sm">-</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-right tabular-nums text-sm text-gray-900">
-                          {pos.currentConversionPrice ? formatKRW(pos.currentConversionPrice) : "-"}
-                        </td>
-                        <td className="px-4 py-3 text-right tabular-nums text-sm">
-                          {parity !== null ? (
-                            <span
-                              className={`font-medium ${
-                                parity >= 100 ? "text-green-600" : parity >= 80 ? "text-yellow-600" : "text-red-600"
-                              }`}
-                            >
-                              {parity.toFixed(0)}%
-                            </span>
-                          ) : (
-                            "-"
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-center text-sm text-gray-600">
-                          {formatDate(pos.issueDate)}
-                        </td>
-                        {(() => {
-                          const put = nextPutWindow(
-                            pos.putOptionSchedule,
-                            pos.putOptionStartDate,
-                            pos.putOptionEndDate,
-                          );
-                          return (
-                            <td
-                              className={`px-4 py-3 text-center tabular-nums text-xs whitespace-nowrap ${
-                                put.exercisable
-                                  ? "text-red-600 font-semibold"
-                                  : "text-gray-600"
-                              }`}
-                            >
-                              {put.text}
-                            </td>
-                          );
-                        })()}
-                        <td className="px-4 py-3 text-center text-sm text-gray-600">
-                          {formatDate(pos.maturityDate)}
-                        </td>
-                        <td className="px-2 py-3 text-center">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              deletePosition(pos.id, pos.assetName);
-                            }}
-                            disabled={deletingId === pos.id}
-                            className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 disabled:opacity-30 disabled:cursor-not-allowed"
-                            title="종목 삭제"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        </td>
-                      </tr>
+                        )}
+                      </th>
                     );
                   })}
-                </tbody>
-              </table>
-            </div>
+                  <th className="px-2 py-3"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {sorted.map((pos) => {
+                  const live = livePrices[pos.underlyingTicker];
+                  const price = live?.price;
+                  const changeRate = live?.changeRate ?? 0;
+                  // 이번 갱신에서 실패해 직전 값이 유지된 경우 — 흐리게 표시
+                  const isStale = live ? Date.now() - live.at > STALE_AFTER_MS : false;
+                  const isRise = changeRate > 0;
+                  const isFall = changeRate < 0;
+                  const parity =
+                    price && pos.currentConversionPrice
+                      ? (price / pos.currentConversionPrice) * 100
+                      : null;
+
+                  return (
+                    <tr
+                      key={pos.id}
+                      className="hover:bg-blue-50/30 transition-colors cursor-pointer"
+                      onClick={() => (window.location.href = `/positions/${pos.id}`)}
+                    >
+                      <td className="px-4 py-3">
+                        <div>
+                          <p className="font-medium text-gray-900">{pos.assetName}</p>
+                          {pos.bondCode && (
+                            <p className="text-xs text-gray-400">{pos.bondCode}</p>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div>
+                          <p className="font-medium text-gray-900">{pos.underlyingCompanyName}</p>
+                          <p className="text-xs text-gray-400">
+                            {pos.underlyingTicker} · {pos.underlyingMarket}
+                          </p>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <Badge variant="neutral">{pos.mezzanineType}</Badge>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <span className="text-xs text-gray-600">
+                          {INVESTMENT_TYPE_LABEL[pos.investmentType] || pos.investmentType}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums text-sm text-gray-900">
+                        {pos.investmentAmount
+                          ? formatKRW(Number(pos.investmentAmount))
+                          : "-"}
+                      </td>
+                      <td
+                        className={`px-4 py-3 text-right tabular-nums text-sm font-medium ${
+                          isStale ? "text-gray-400" : "text-gray-900"
+                        }`}
+                        title={
+                          isStale
+                            ? `${new Date(live!.at).toLocaleTimeString("ko-KR")} 기준 (갱신 실패로 직전 값 유지)`
+                            : undefined
+                        }
+                      >
+                        {price ? formatKRW(price) : "-"}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        {price !== undefined ? (
+                          <span
+                            className={`tabular-nums text-sm font-semibold flex items-center justify-end gap-0.5 ${
+                              isRise ? "text-rise" : isFall ? "text-fall" : "text-gray-500"
+                            }`}
+                          >
+                            {isRise ? (
+                              <TrendingUp className="h-3 w-3" />
+                            ) : isFall ? (
+                              <TrendingDown className="h-3 w-3" />
+                            ) : null}
+                            {formatPercent(changeRate)}
+                          </span>
+                        ) : (
+                          <span className="text-gray-400 text-sm">-</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums text-sm text-gray-900">
+                        {pos.currentConversionPrice ? formatKRW(pos.currentConversionPrice) : "-"}
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums text-sm">
+                        {parity !== null ? (
+                          <span
+                            className={`font-medium ${
+                              parity >= 100 ? "text-green-600" : parity >= 80 ? "text-yellow-600" : "text-red-600"
+                            }`}
+                          >
+                            {parity.toFixed(0)}%
+                          </span>
+                        ) : (
+                          "-"
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-center text-sm text-gray-600">
+                        {formatDate(pos.issueDate)}
+                      </td>
+                      {(() => {
+                        const put = nextPutWindow(
+                          pos.putOptionSchedule,
+                          pos.putOptionStartDate,
+                          pos.putOptionEndDate,
+                        );
+                        return (
+                          <td
+                            className={`px-4 py-3 text-center tabular-nums text-xs whitespace-nowrap ${
+                              put.exercisable
+                                ? "text-red-600 font-semibold"
+                                : "text-gray-600"
+                            }`}
+                          >
+                            {put.text}
+                          </td>
+                        );
+                      })()}
+                      <td className="px-4 py-3 text-center text-sm text-gray-600">
+                        {formatDate(pos.maturityDate)}
+                      </td>
+                      <td className="px-2 py-3 text-center">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            deletePosition(pos.id, pos.assetName);
+                          }}
+                          disabled={deletingId === pos.id}
+                          className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 disabled:opacity-30 disabled:cursor-not-allowed"
+                          title="종목 삭제"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
-        )}
-      </div>
-    </>
+        </div>
+      )}
+    </div>
   );
 }
