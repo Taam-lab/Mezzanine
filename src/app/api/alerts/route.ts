@@ -23,12 +23,17 @@ async function cleanupStaleDisclosures(): Promise<void> {
   lastCleanupAt = Date.now();
   try {
     const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
-    await prisma.alert.deleteMany({
-      where: {
-        alertType: "DISCLOSURE",
-        OR: [{ metadata: null }, { createdAt: { lt: threeDaysAgo } }],
-      },
-    });
+    const stale = {
+      alertType: "DISCLOSURE",
+      OR: [{ metadata: null }, { createdAt: { lt: threeDaysAgo } }],
+    };
+    // alert_user_status → alerts FK 가 ON DELETE RESTRICT 라 읽음 상태 행이 붙은 알림은
+    // 먼저 상태 행을 지워야 한다. 예전엔 alerts 만 지워서, "모두 읽음"을 한 번이라도
+    // 누른 뒤로는 이 정리가 매번 FK 오류로(아래 catch 에서 조용히) 실패했다.
+    await prisma.$transaction([
+      prisma.alertUserStatus.deleteMany({ where: { alert: stale } }),
+      prisma.alert.deleteMany({ where: stale }),
+    ]);
   } catch {
     // ignore
   }

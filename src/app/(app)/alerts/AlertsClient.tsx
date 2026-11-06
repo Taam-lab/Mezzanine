@@ -16,6 +16,7 @@ const ALERT_TYPE_LABEL: Record<string, string> = {
   RISK: "리스크",
   NEWS: "뉴스",
   PRICE_MOVEMENT: "주가변동",
+  PRICE_MOVE: "주가변동", // 대시보드·워커가 만드는 급등락 알림 타입
   DISCLOSURE: "공시",
   CONVERSION_PRICE_ADJUSTMENT: "전환가조정",
 };

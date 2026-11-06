@@ -67,8 +67,14 @@ export async function sendTelegramAlert(a: SendArgs): Promise<{
   const severityLabel = a.severity === "CRITICAL" ? "긴급" : "중요";
 
   // Telegram MarkdownV2 는 이스케이프 지옥이라 그냥 HTML mode 사용.
+  // 따옴표도 이스케이프 — href="…" 속성 안에 들어가는 URL 에 " 가 있으면
+  // 텔레그램이 엔티티 파싱 실패(400)로 메시지 전체를 거부한다.
   const esc = (s: string) =>
-    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    s
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
   const lines = [
     `${emoji} <b>[${severityLabel}] ${esc(a.title)}</b>`,
   ];
