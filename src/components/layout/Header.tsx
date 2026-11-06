@@ -3,7 +3,7 @@
 import { Bell, ChevronDown, LogOut, User, Menu } from "lucide-react";
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { ALERTS_CHANGED_EVENT } from "@/lib/alertEvents";
 
 interface Props {
@@ -14,6 +14,21 @@ export function Header({ onMenuToggle }: Props = {}) {
   const router = useRouter();
   const [unreadCount, setUnreadCount] = useState(0);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const pathname = usePathname();
+
+  // 검색창은 그동안 아무 동작도 없는 장식이었다. Enter 로 보유종목 목록을 그 검색어로
+  // 연다 (목록 검색칸과 같은 필터: 종목명·회사명·종목코드).
+  function submitSearch(e: React.FormEvent) {
+    e.preventDefault();
+    const q = query.trim();
+    router.push(q ? `/positions?q=${encodeURIComponent(q)}` : "/positions");
+  }
+
+  // 목록 밖으로 나가면 비운다 — 다른 화면에서 지난 검색어가 남아 있으면 헷갈린다.
+  useEffect(() => {
+    if (!pathname.startsWith("/positions")) setQuery("");
+  }, [pathname]);
 
   useEffect(() => {
     // 미확인 알림 뱃지는 첫 페인트에 필요 없다. 페이지의 주요 요청과 대역폭·
@@ -75,13 +90,16 @@ export function Header({ onMenuToggle }: Props = {}) {
       )}
 
       {/* 검색: 모바일에선 숨김 (햄버거+알림+프로필로 폭 확보) */}
-      <div className="hidden md:block flex-1 max-w-md">
+      <form onSubmit={submitSearch} className="hidden md:block flex-1 max-w-md" role="search">
         <input
-          type="text"
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
           placeholder="종목명, 종목코드 검색..."
+          aria-label="보유 종목 검색"
           className="w-full px-4 py-1.5 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:border-[#0A2A5E] focus:ring-1 focus:ring-[#0A2A5E]"
         />
-      </div>
+      </form>
 
       <div className="flex items-center gap-1 md:gap-3 ml-auto">
         <Link href="/alerts" className="relative p-2 rounded-lg hover:bg-gray-100 transition-colors">
