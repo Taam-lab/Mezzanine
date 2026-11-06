@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
 import { fetchNaverQuote, type NaverQuote } from "@/lib/naverPrice";
-import { getDefaultUserId } from "@/lib/defaultUser";
+import { getDashboardData } from "@/lib/dashboardQuery";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -14,7 +13,7 @@ export const maxDuration = 15;
  * lambda 콜드스타트를 3번 → 1번으로 줄인다.
  *
  * tickers 파라미터가 있으면 (클라이언트 sessionStorage 캐시에서 온 값):
- *   positions.findMany + alert.findMany + Naver 시세 (모두 병렬) — wall clock = 가장 느린 하나
+ *   DB 배치(positions + alerts) + Naver 시세 병렬 — wall clock = 가장 느린 하나
  *
  * 없으면 (진짜 최초 방문):
  *   positions + alert 병렬 → 그 다음 그 결과의 티커로 시세
@@ -35,37 +34,11 @@ export async function GET(req: NextRequest) {
       )
     : [];
 
-  const userId = await getDefaultUserId();
-
-  // 병렬 실행:
-  //   - positions.findMany (slim select)
-  //   - alert.findMany (limit 20)
-  //   - 힌트 티커가 있으면 그걸로 Naver 시세도 병렬 시작
-  const [positions, alertsRaw, hintedQuotes] = await Promise.all([
-    prisma.position.findMany({
-      where: { isActive: true },
-      select: {
-        id: true,
-        assetName: true,
-        underlyingTicker: true,
-        underlyingCompanyName: true,
-        currentConversionPrice: true,
-        investmentAmount: true,
-        putOptionStartDate: true,
-        putOptionEndDate: true,
-        putOptionSchedule: true,
-        isActive: true,
-      },
-      orderBy: { createdAt: "desc" },
-    }),
-    prisma.alert.findMany({
-      include: {
-        position: { select: { id: true, assetName: true, underlyingCompanyName: true } },
-        userStatuses: { where: { userId }, take: 1 },
-      },
-      orderBy: { createdAt: "desc" },
-      take: 20,
-    }),
+  // DB(활성 종목 + 최근 알림, 배치 1회)와 힌트 티커의 네이버 시세를 병렬로.
+  // 대시보드 서버 컴포넌트와 같은 조회를 공유한다 (src/lib/dashboardQuery.ts).
+  // 대시보드는 읽음 상태를 안 쓰므로 getDefaultUserId()(upsert)·userStatuses 조인은 뺐다.
+  const [{ positions, alerts: alertsRaw }, hintedQuotes] = await Promise.all([
+    getDashboardData(20),
     hintedTickers.length > 0
       ? Promise.allSettled(hintedTickers.map((t) => fetchNaverQuote(t)))
       : Promise.resolve([]),

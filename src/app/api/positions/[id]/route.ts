@@ -1,78 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { positionSchema } from "@/lib/validations";
+import { getPositionDetail } from "@/lib/positionDetailQuery";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
-  const id = params.id;
-
-  // 관계별 independent query.
-  //
-  // financialSnapshots / alerts 는 상세 페이지가 전혀 읽지 않아 제거했다
-  // (page.tsx 853줄에 참조 0건). DATABASE_URL 의 connection_limit=1 때문에
-  // Promise.all 이 실제로는 순차 실행이라, 안 쓰는 관계 하나가 곧 왕복 한 번이다.
-  //
-  // 남은 관계에도 select 를 명시해 상세 페이지가 렌더하지 않는 컬럼 —
-  // 특히 disclosure.parsedData 의 JSON 블롭 (20행 × 파싱 결과 전체) — 을
-  // 응답에서 제외한다.
-  const [
-    position,
-    priceSnapshots,
-    riskCheckResults,
-    disclosures,
-    newsItems,
-    conversionPriceHistory,
-  ] = await Promise.all([
-    prisma.position.findUnique({
-      where: { id },
-      include: { owner: { select: { name: true, email: true } } },
-    }),
-    prisma.priceSnapshot.findMany({
-      where: { positionId: id },
-      select: { id: true, price: true, changeRate: true, snapshotAt: true },
-      orderBy: { snapshotAt: "desc" },
-      take: 30,
-    }),
-    prisma.riskCheckResult.findMany({
-      where: { positionId: id },
-      orderBy: { checkedAt: "desc" },
-      distinct: ["checkId"],
-    }),
-    prisma.disclosure.findMany({
-      where: { positionId: id },
-      select: {
-        id: true,
-        reportName: true,
-        severity: true,
-        filedAt: true,
-        dartUrl: true,
-      },
-      orderBy: { filedAt: "desc" },
-      take: 20,
-    }),
-    prisma.newsItem.findMany({
-      where: { positionId: id },
-      orderBy: { publishedAt: "desc" },
-      take: 20,
-    }),
-    prisma.conversionPriceHistory.findMany({
-      where: { positionId: id },
-      orderBy: { adjustedAt: "asc" },
-    }),
-  ]);
-
+  // 상세 페이지 서버 컴포넌트와 같은 조회를 공유한다 (src/lib/positionDetailQuery.ts).
+  // 관계 5개를 SQL 한 문장으로 읽는다 — 이전 구현은 7쿼리(25문장)였다.
+  const position = await getPositionDetail(params.id);
   if (!position) return NextResponse.json({ error: "Not Found" }, { status: 404 });
-
-  return NextResponse.json({
-    ...position,
-    priceSnapshots,
-    riskCheckResults,
-    disclosures,
-    newsItems,
-    conversionPriceHistory,
-  });
+  return NextResponse.json(position);
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {

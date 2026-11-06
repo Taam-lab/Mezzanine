@@ -1,5 +1,10 @@
 generator client {
   provider = "prisma-client-js"
+  // include/관계 select 를 관계마다 별도 SELECT 로 쪼개지 않고 한 문장(LATERAL JOIN +
+  // JSON 집계)으로 읽는다. DATABASE_URL 의 pgbouncer=true 모드에서 Prisma 는 쿼리 하나를
+  // BEGIN / DEALLOCATE ALL / 쿼리 / COMMIT 으로 감싸 보내므로(왕복 ~5회), 쿼리 개수가 곧
+  // 응답 시간이다. 상세 화면(관계 5개)이 쿼리 24문장 → 4문장으로 줄었다.
+  previewFeatures = ["relationJoins"]
 }
 
 datasource db {
