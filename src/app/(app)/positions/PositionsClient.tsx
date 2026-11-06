@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -168,6 +169,7 @@ export default function PositionsClient({
 }: {
   initialPositions: Position[];
 }) {
+  const router = useRouter();
   const [positions, setPositions] = useState<Position[]>(initialPositions);
   // 서버가 이미 목록을 채워줬으므로 첫 렌더에서 스피너를 띄우지 않는다.
   const [loading, setLoading] = useState(initialPositions.length === 0);
@@ -311,6 +313,9 @@ export default function PositionsClient({
         return;
       }
       setPositions((prev) => prev.filter((p) => p.id !== id));
+      // 화면은 위에서 바로 지웠다. refresh 는 30초 라우터 캐시에 남은 옛 목록
+      // (삭제한 행 포함)을 버리게 하려는 것 — 다른 메뉴에 갔다 돌아와도 안 보이게.
+      router.refresh();
     } catch (err) {
       alert(err instanceof Error ? err.message : "네트워크 오류");
     } finally {
@@ -707,7 +712,16 @@ export default function PositionsClient({
                     <tr
                       key={pos.id}
                       className="hover:bg-blue-50/30 transition-colors cursor-pointer"
-                      onClick={() => (window.location.href = `/positions/${pos.id}`)}
+                      // 예전엔 window.location.href 로 문서를 통째로 다시 받았다 (JS 재실행·
+                      // 셸 재렌더·하이드레이션 전부 다시). 클라이언트 라우팅으로 본문만 교체한다.
+                      //
+                      // 마우스를 올리면 상세 페이지를 데이터까지 미리 받아 둔다 (Next 14 의
+                      // router.prefetch 기본값은 FULL). 올려놓고 누르기까지의 짧은 틈에 서버
+                      // 왕복이 끝나서 클릭하면 바로 뜬다. 이렇게 받은 페이지는 최대 5분
+                      // 재사용되지만 수정·삭제 경로는 router.refresh() 로 캐시를 비우고,
+                      // 현재가는 상세 화면이 마운트될 때 따로 새로 받는다.
+                      onClick={() => router.push(`/positions/${pos.id}`)}
+                      onMouseEnter={() => router.prefetch(`/positions/${pos.id}`)}
                     >
                       <td className="px-4 py-3">
                         <div>

@@ -13,11 +13,14 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+// href 는 실제 페이지로 바로 건다. /settings 는 redirect() 만 하는 페이지라, 그쪽으로
+// 링크하면 클라이언트 라우터가 리다이렉트를 따라가지 못하고 문서를 통째로 다시
+// 받는다(전체 새로고침). 활성 표시는 match 접두어로 한다.
 const NAV_ITEMS = [
-  { href: "/dashboard", icon: LayoutDashboard, label: "대시보드" },
-  { href: "/positions", icon: Briefcase, label: "보유 종목" },
-  { href: "/alerts", icon: Bell, label: "알림함" },
-  { href: "/settings", icon: Settings, label: "설정" },
+  { href: "/dashboard", match: "/dashboard", icon: LayoutDashboard, label: "대시보드" },
+  { href: "/positions", match: "/positions", icon: Briefcase, label: "보유 종목" },
+  { href: "/alerts", match: "/alerts", icon: Bell, label: "알림함" },
+  { href: "/settings/notifications", match: "/settings", icon: Settings, label: "설정" },
 ];
 
 interface Props {
@@ -75,7 +78,7 @@ export function Sidebar({ mobileOpen = false, onClose }: Props) {
         {/* 네비게이션 */}
         <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
           {NAV_ITEMS.map((item) => {
-            const active = pathname.startsWith(item.href);
+            const active = pathname.startsWith(item.match);
             return (
               <Link
                 key={item.href}

@@ -1,4 +1,5 @@
 import { Card, CardContent, CardHeader } from "@/components/ui/Card";
+import { Shimmer } from "@/components/ui/Skeleton";
 
 /**
  * loading.tsx 는 Next 가 page 주위에 암묵적 <Suspense> 를 걸어주는 자리다.
@@ -11,10 +12,6 @@ import { Card, CardContent, CardHeader } from "@/components/ui/Card";
  * 스켈레톤의 그리드/간격은 DashboardClient 의 실제 레이아웃과 맞춰야
  * 교체 시점에 화면이 튀지 않는다.
  */
-function Shimmer({ className = "" }: { className?: string }) {
-  return <div className={`animate-pulse rounded bg-gray-200 ${className}`} />;
-}
-
 export default function DashboardLoading() {
   return (
     <div className="space-y-6">
