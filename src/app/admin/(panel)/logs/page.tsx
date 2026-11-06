@@ -1,12 +1,11 @@
 "use client";
 
-import { AdminLayout } from "@/components/layout/AdminLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Activity } from "lucide-react";
 
 export default function AdminLogsPage() {
   return (
-    <AdminLayout>
+    <>
       <div className="space-y-5 max-w-4xl">
         <h1 className="text-xl font-bold text-gray-900">시스템 로그</h1>
 
@@ -25,6 +24,6 @@ export default function AdminLogsPage() {
           </CardContent>
         </Card>
       </div>
-    </AdminLayout>
+    </>
   );
 }

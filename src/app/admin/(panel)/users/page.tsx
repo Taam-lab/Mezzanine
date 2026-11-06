@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AdminLayout } from "@/components/layout/AdminLayout";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { formatDateTime } from "@/lib/utils";
@@ -59,7 +58,7 @@ export default function AdminUsersPage() {
   const displayList = tab === "pending" ? pending : approved;
 
   return (
-    <AdminLayout>
+    <>
       <div className="space-y-5">
         <div className="flex items-center justify-between">
           <h1 className="text-xl font-bold text-gray-900">사용자 관리</h1>
@@ -198,6 +197,6 @@ export default function AdminUsersPage() {
           </div>
         )}
       </div>
-    </AdminLayout>
+    </>
   );
 }

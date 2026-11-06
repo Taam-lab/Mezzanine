@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Bell, BellOff, CheckCircle2 } from "lucide-react";
@@ -58,7 +57,7 @@ export default function NotificationsSettingsPage() {
   }
 
   return (
-    <AppLayout>
+    <>
       <div className="max-w-2xl space-y-5">
         <h1 className="text-xl font-bold text-gray-900">알림 설정</h1>
 
@@ -142,6 +141,6 @@ export default function NotificationsSettingsPage() {
           </CardContent>
         </Card>
       </div>
-    </AppLayout>
+    </>
   );
 }

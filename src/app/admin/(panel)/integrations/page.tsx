@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AdminLayout } from "@/components/layout/AdminLayout";
 import { Button } from "@/components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { CheckCircle2, AlertCircle, Eye, EyeOff, Save } from "lucide-react";
@@ -122,7 +121,7 @@ export default function AdminIntegrationsPage() {
   }
 
   return (
-    <AdminLayout>
+    <>
       <div className="space-y-5 max-w-3xl">
         <h1 className="text-xl font-bold text-gray-900">API 키 관리</h1>
         <p className="text-sm text-gray-600">
@@ -255,6 +254,6 @@ export default function AdminIntegrationsPage() {
           );
         })}
       </div>
-    </AdminLayout>
+    </>
   );
 }

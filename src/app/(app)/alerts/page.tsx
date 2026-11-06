@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AppLayout } from "@/components/layout/AppLayout";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { formatDateTime, SEVERITY_LABEL } from "@/lib/utils";
@@ -77,7 +76,7 @@ export default function AlertsPage() {
   };
 
   return (
-    <AppLayout>
+    <>
       <div className="space-y-5">
         <div className="flex items-center justify-between">
           <h1 className="text-xl font-bold text-gray-900">알림함</h1>
@@ -179,6 +178,6 @@ export default function AlertsPage() {
           </div>
         )}
       </div>
-    </AppLayout>
+    </>
   );
 }

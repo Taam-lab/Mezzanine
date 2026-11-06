@@ -4,6 +4,7 @@ import { Bell, ChevronDown, LogOut, User, Menu } from "lucide-react";
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { ALERTS_CHANGED_EVENT } from "@/lib/alertEvents";
 
 interface Props {
   onMenuToggle?: () => void;
@@ -19,12 +20,20 @@ export function Header({ onMenuToggle }: Props = {}) {
     // 커넥션을 다투지 않도록 유휴 시점으로 미룬다.
     // requestIdleCallback 미지원 브라우저(구형 Safari)는 setTimeout 폴백 —
     // 가드 없이 쓰면 그쪽에서 뱃지가 영영 안 뜬다.
+    //
+    // 헤더는 (app)/layout.tsx 에 상주하므로 이 effect 는 첫 진입 때 한 번만 돈다
+    // (예전엔 페이지 이동마다 재마운트되어 매번 API 를 다시 불렀다).
+    // 이후 갱신은 알림을 바꾼 쪽이 쏘는 ALERTS_CHANGED_EVENT 로만 한다.
+    let cancelled = false;
     const run = () => {
       fetch("/api/alerts?unreadOnly=true&countOnly=true")
         .then((r) => r.json())
-        .then((d) => setUnreadCount(d.count || 0))
+        .then((d) => {
+          if (!cancelled) setUnreadCount(d.count || 0);
+        })
         .catch(() => {});
     };
+    window.addEventListener(ALERTS_CHANGED_EVENT, run);
     const idle =
       typeof window !== "undefined" &&
       typeof (window as unknown as { requestIdleCallback?: unknown })
@@ -35,8 +44,9 @@ export function Header({ onMenuToggle }: Props = {}) {
         }).requestIdleCallback(run, { timeout: 2000 })
       : (setTimeout(run, 300) as unknown as number);
 
-    // Header 는 라우트 이동마다 언마운트되므로 정리 필요
     return () => {
+      cancelled = true;
+      window.removeEventListener(ALERTS_CHANGED_EVENT, run);
       if (idle) {
         (window as unknown as { cancelIdleCallback: (h: number) => void })
           .cancelIdleCallback(handle);
