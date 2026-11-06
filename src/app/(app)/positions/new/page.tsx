@@ -2,7 +2,6 @@
 
 import { useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
@@ -127,7 +126,7 @@ function NewPositionContent() {
     parseResult?.autoFilledFields.includes(field) ?? false;
 
   return (
-    <AppLayout>
+    <>
       <div className="max-w-4xl mx-auto space-y-5">
         {/* 헤더 */}
         <div className="flex items-center gap-3">
@@ -580,7 +579,7 @@ function NewPositionContent() {
           </form>
         )}
       </div>
-    </AppLayout>
+    </>
   );
 }
 

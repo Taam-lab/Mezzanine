@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -312,11 +311,11 @@ export default function PositionDetailPage() {
 
   if (loading) {
     return (
-      <AppLayout>
+      <>
         <div className="flex items-center justify-center py-20">
           <div className="animate-spin h-8 w-8 border-4 border-[#0A2A5E] border-t-transparent rounded-full" />
         </div>
-      </AppLayout>
+      </>
     );
   }
 
@@ -352,7 +351,7 @@ export default function PositionDetailPage() {
   };
 
   return (
-    <AppLayout>
+    <>
       <div className="max-w-5xl mx-auto space-y-6">
         {/* 헤더 */}
         <div className="flex items-start justify-between">
@@ -849,6 +848,6 @@ export default function PositionDetailPage() {
           </div>
         </div>
       </div>
-    </AppLayout>
+    </>
   );
 }

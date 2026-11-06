@@ -1,4 +1,3 @@
-import { AppLayout } from "@/components/layout/AppLayout";
 import { Card } from "@/components/ui/Card";
 
 /**
@@ -12,7 +11,7 @@ function Shimmer({ className = "" }: { className?: string }) {
 
 export default function PositionsLoading() {
   return (
-    <AppLayout>
+    <>
       <div className="space-y-5">
         <div className="flex items-center justify-between">
           <Shimmer className="h-6 w-28" />
@@ -46,6 +45,6 @@ export default function PositionsLoading() {
           </div>
         </Card>
       </div>
-    </AppLayout>
+    </>
   );
 }

@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AdminLayout } from "@/components/layout/AdminLayout";
 import { Button } from "@/components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
@@ -53,10 +52,10 @@ export default function AdminSystemPage() {
     setTimeout(() => setSaved(false), 3000);
   }
 
-  if (loading) return <AdminLayout><div className="text-center py-12 text-gray-400">불러오는 중...</div></AdminLayout>;
+  if (loading) return <><div className="text-center py-12 text-gray-400">불러오는 중...</div></>;
 
   return (
-    <AdminLayout>
+    <>
       <div className="space-y-5 max-w-2xl">
         <h1 className="text-xl font-bold text-gray-900">시스템 설정</h1>
 
@@ -122,6 +121,6 @@ export default function AdminSystemPage() {
           </Button>
         </div>
       </div>
-    </AdminLayout>
+    </>
   );
 }

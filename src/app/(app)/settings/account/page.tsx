@@ -1,12 +1,11 @@
 "use client";
 
-import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { User } from "lucide-react";
 
 export default function AccountSettingsPage() {
   return (
-    <AppLayout>
+    <>
       <div className="max-w-2xl space-y-5">
         <h1 className="text-xl font-bold text-gray-900">계정 설정</h1>
 
@@ -40,6 +39,6 @@ export default function AccountSettingsPage() {
           </CardContent>
         </Card>
       </div>
-    </AppLayout>
+    </>
   );
 }

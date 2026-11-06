@@ -1,4 +1,3 @@
-import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardHeader } from "@/components/ui/Card";
 
 /**
@@ -18,7 +17,7 @@ function Shimmer({ className = "" }: { className?: string }) {
 
 export default function DashboardLoading() {
   return (
-    <AppLayout>
+    <>
       <div className="space-y-6">
         {/* 헤더 */}
         <div className="flex items-center justify-between">
@@ -98,6 +97,6 @@ export default function DashboardLoading() {
           ))}
         </div>
       </div>
-    </AppLayout>
+    </>
   );
 }

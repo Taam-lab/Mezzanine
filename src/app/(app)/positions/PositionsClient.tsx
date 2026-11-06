@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { AppLayout } from "@/components/layout/AppLayout";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -467,7 +466,7 @@ export default function PositionsClient({
   }, [filtered, sortCol, sortDir]);
 
   return (
-    <AppLayout>
+    <>
       <div className="space-y-5">
         <div className="flex items-center justify-between">
           <h1 className="text-xl font-bold text-gray-900">보유 종목</h1>
@@ -832,6 +831,6 @@ export default function PositionsClient({
           </div>
         )}
       </div>
-    </AppLayout>
+    </>
   );
 }

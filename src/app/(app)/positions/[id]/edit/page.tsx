@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
@@ -118,16 +117,16 @@ export default function EditPositionPage() {
 
   if (loading) {
     return (
-      <AppLayout>
+      <>
         <div className="flex items-center justify-center py-20">
           <div className="animate-spin h-8 w-8 border-4 border-[#0A2A5E] border-t-transparent rounded-full" />
         </div>
-      </AppLayout>
+      </>
     );
   }
 
   return (
-    <AppLayout>
+    <>
       <div className="max-w-4xl mx-auto space-y-5">
         <div className="flex items-center gap-3">
           <Link href={`/positions/${params.id}`}>
@@ -220,6 +219,6 @@ export default function EditPositionPage() {
           </div>
         </form>
       </div>
-    </AppLayout>
+    </>
   );
 }
