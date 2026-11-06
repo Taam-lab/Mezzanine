@@ -27,6 +27,7 @@ import {
   INVESTMENT_TYPE_LABEL,
   SEVERITY_LABEL,
   RISK_CHECK_LABELS,
+  startOfTodayKST,
 } from "@/lib/utils";
 import dynamic from "next/dynamic";
 import type { PositionDetail } from "@/lib/positionDetailQuery";
@@ -64,8 +65,7 @@ function nextExerciseWindow(
   startIso: string | null,
   endIso: string | null,
 ): string {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const today = startOfTodayKST();
 
   if (scheduleJson) {
     try {
@@ -472,8 +472,7 @@ export default function PositionDetailClient({ position }: { position: PositionD
                     return null;
                   }
                   if (!Array.isArray(rows) || rows.length === 0) return null;
-                  const today = new Date();
-                  today.setHours(0, 0, 0, 0);
+                  const today = startOfTodayKST();
                   return (
                     <section>
                       <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">

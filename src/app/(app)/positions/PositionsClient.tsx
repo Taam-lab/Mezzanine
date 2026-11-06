@@ -22,6 +22,7 @@ import {
   formatPercent,
   formatDate,
   INVESTMENT_TYPE_LABEL,
+  startOfTodayKST,
 } from "@/lib/utils";
 
 interface Position {
@@ -52,8 +53,7 @@ function nextPutWindow(
   startIso: string | null,
   endIso: string | null,
 ): { text: string; exercisable: boolean } {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const today = startOfTodayKST();
   const fmt = (iso: string) => iso.slice(0, 10);
 
   if (scheduleJson) {
@@ -380,8 +380,7 @@ export default function PositionsClient({
       if (p.putOptionSchedule) {
         try {
           const rows = JSON.parse(p.putOptionSchedule) as Array<{ from: string; to: string }>;
-          const today = new Date();
-          today.setHours(0, 0, 0, 0);
+          const today = startOfTodayKST();
           for (const r of rows) {
             if (today > new Date(r.to)) continue;
             nextPutStart = new Date(r.from).getTime();

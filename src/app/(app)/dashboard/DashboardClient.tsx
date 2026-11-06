@@ -19,7 +19,14 @@ import {
   Clock,
 } from "lucide-react";
 import Link from "next/link";
-import { formatPercent, formatDateTime, formatKRWShort, SEVERITY_LABEL } from "@/lib/utils";
+import {
+  formatPercent,
+  formatDateTime,
+  formatKRWShort,
+  formatTodayKST,
+  SEVERITY_LABEL,
+  startOfTodayKST,
+} from "@/lib/utils";
 import { notifyAlertsChanged } from "@/lib/alertEvents";
 
 interface DashboardStats {
@@ -96,8 +103,7 @@ interface PositionSlim {
  *      일 때만 (한 회차로 볼 만한 길이). 60+ 일이면 lifetime 이라 신뢰 못 함.
  */
 function currentPutWindow(p: PositionSlim): { from: string; to: string } | null {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const today = startOfTodayKST();
   if (p.putOptionSchedule) {
     try {
       const rows = JSON.parse(p.putOptionSchedule) as Array<{ from: string; to: string }>;
@@ -746,7 +752,7 @@ export default function DashboardClient({
                 <Clock className="h-4 w-4 text-red-600" />
                 풋옵션 행사 가능 종목
                 <span className="text-xs text-gray-400 font-normal ml-1">
-                  (오늘 {new Date().toLocaleDateString("ko-KR")})
+                  (오늘 {formatTodayKST()})
                 </span>
               </CardTitle>
               <span className="text-xs font-semibold text-red-600">
