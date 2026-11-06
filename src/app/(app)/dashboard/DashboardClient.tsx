@@ -202,6 +202,27 @@ function dedupeAlerts(list: UiAlert[]): UiAlert[] {
 }
 
 /**
+ * 피드 API 용 "티커:회사명" 목록. 활성 종목만, 티커당 첫 이름.
+ * 피드 응답은 URL 단위로 CDN 캐시(s-maxage=90)되므로 같은 입력이면 같은 문자열이
+ * 나와야 한다 — 시작 시점과 로드 후 경로가 이 함수 하나를 쓴다.
+ */
+function feedTickerEntries(positions: PositionSlim[]): { tickers: string[]; entries: string } {
+  const tickerNameMap = new Map<string, string>();
+  for (const p of positions) {
+    if (!p.isActive || !/^\d{6}$/.test(p.underlyingTicker)) continue;
+    if (!tickerNameMap.has(p.underlyingTicker)) {
+      tickerNameMap.set(p.underlyingTicker, p.underlyingCompanyName);
+    }
+  }
+  return {
+    tickers: Array.from(tickerNameMap.keys()),
+    entries: Array.from(tickerNameMap.entries())
+      .map(([t, n]) => `${t}:${encodeURIComponent(n)}`)
+      .join(","),
+  };
+}
+
+/**
  * 대시보드. positions/alerts 는 서버 컴포넌트(page.tsx)가 DB 에서 직접 읽어
  * props 로 내려주므로 첫 화면에 요약 타일·풋 카드·알림이 이미 채워져 있다.
  * 클라이언트는 느린 외부 데이터(네이버 시세, 뉴스/공시 피드)만 이어서 붙인다.
@@ -322,12 +343,19 @@ export default function DashboardClient({
       // 캐시버스터 없이 호출 — feed 응답은 s-maxage=90 CDN 캐시가 걸려 있어서
       // 같은 URL 재요청은 엣지에서 즉시 반환됨 (강제 새로고침 때만 우회).
       const feedBuster = forceRefresh ? `&t=${Date.now()}` : "";
-      const preFeedPromise =
-        hintedNameEntriesRaw && !forceRefresh
-          ? fetch(`/api/dashboard/feed?tickers=${hintedNameEntriesRaw}`)
-              .then((r) => r.json())
-              .catch(() => null)
-          : Promise.resolve(null);
+      // 뉴스/공시 피드는 시세와 동시에 시작한다. 서버가 종목을 이미 내려줬으면 그걸로
+      // 티커를 알 수 있다 — 예전엔 sessionStorage 힌트가 없는 첫 방문에서 시세 응답을
+      // 다 기다린 뒤에야 피드를 요청해서 두 외부 호출이 직렬로 쌓였다.
+      const earlyFeedEntries = forceRefresh
+        ? null
+        : initialPositions.length > 0
+          ? feedTickerEntries(initialPositions).entries || null
+          : hintedNameEntriesRaw;
+      const preFeedPromise = earlyFeedEntries
+        ? fetch(`/api/dashboard/feed?tickers=${earlyFeedEntries}`)
+            .then((r) => r.json())
+            .catch(() => null)
+        : Promise.resolve(null);
 
       // 첫 로드에서는 서버가 내려준 positions/alerts 를 그대로 쓰고, 느린 외부
       // 데이터(시세)만 따로 받는다 — init 왕복이 통째로 사라진다.
@@ -374,17 +402,7 @@ export default function DashboardClient({
         quotes = init.quotes ?? {};
       }
 
-      const tickerNameMap = new Map<string, string>();
-      for (const p of positions) {
-        if (!p.isActive || !/^\d{6}$/.test(p.underlyingTicker)) continue;
-        if (!tickerNameMap.has(p.underlyingTicker)) {
-          tickerNameMap.set(p.underlyingTicker, p.underlyingCompanyName);
-        }
-      }
-      const tickers = Array.from(tickerNameMap.keys());
-      const tickerNameEntries = Array.from(tickerNameMap.entries())
-        .map(([t, n]) => `${t}:${encodeURIComponent(n)}`)
-        .join(",");
+      const { tickers, entries: tickerNameEntries } = feedTickerEntries(positions);
 
       // 티커 & 티커:이름 캐시 저장 (다음 로드시 init/feed 힌트로 활용)
       if (tickers.length > 0 && typeof window !== "undefined") {
