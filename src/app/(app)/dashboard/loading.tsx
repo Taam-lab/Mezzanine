@@ -17,86 +17,84 @@ function Shimmer({ className = "" }: { className?: string }) {
 
 export default function DashboardLoading() {
   return (
-    <>
-      <div className="space-y-6">
-        {/* 헤더 */}
-        <div className="flex items-center justify-between">
-          <div>
-            <Shimmer className="h-6 w-24" />
-            <Shimmer className="mt-2 h-3 w-40" />
-          </div>
-          <Shimmer className="h-9 w-24" />
+    <div className="space-y-6">
+      {/* 헤더 */}
+      <div className="flex items-center justify-between">
+        <div>
+          <Shimmer className="h-6 w-24" />
+          <Shimmer className="mt-2 h-3 w-40" />
         </div>
-
-        {/* 요약 타일 4개 */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {[0, 1, 2, 3].map((i) => (
-            <Card key={i}>
-              <CardContent className="flex items-center gap-4">
-                <Shimmer className="h-10 w-10 rounded-xl" />
-                <div className="flex-1">
-                  <Shimmer className="h-3 w-16" />
-                  <Shimmer className="mt-2 h-7 w-10" />
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-
-        {/* 풋옵션 행사 가능 종목 (가로 전체) */}
-        <Card className="border-red-100">
-          <CardHeader>
-            <Shimmer className="h-4 w-48" />
-          </CardHeader>
-          <CardContent className="py-3">
-            <div className="flex flex-wrap gap-2">
-              <Shimmer className="h-9 w-64" />
-              <Shimmer className="h-9 w-56" />
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* 최근 알림 | 주가 변동 */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {[0, 1].map((i) => (
-            <Card key={i}>
-              <CardHeader>
-                <Shimmer className="h-4 w-28" />
-              </CardHeader>
-              <div className="divide-y divide-gray-50">
-                {[0, 1, 2, 3, 4].map((j) => (
-                  <div key={j} className="px-5 py-3 flex items-start gap-3">
-                    <Shimmer className="h-5 w-10 flex-shrink-0" />
-                    <div className="flex-1">
-                      <Shimmer className="h-4 w-full max-w-xs" />
-                      <Shimmer className="mt-1.5 h-3 w-28" />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </Card>
-          ))}
-        </div>
-
-        {/* 뉴스 | 공시 */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {[0, 1].map((i) => (
-            <Card key={i}>
-              <CardHeader>
-                <Shimmer className="h-4 w-32" />
-              </CardHeader>
-              <div className="divide-y divide-gray-50">
-                {[0, 1, 2].map((j) => (
-                  <div key={j} className="px-5 py-3">
-                    <Shimmer className="h-3 w-40" />
-                    <Shimmer className="mt-2 h-4 w-full" />
-                  </div>
-                ))}
-              </div>
-            </Card>
-          ))}
-        </div>
+        <Shimmer className="h-9 w-24" />
       </div>
-    </>
+
+      {/* 요약 타일 4개 */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {[0, 1, 2, 3].map((i) => (
+          <Card key={i}>
+            <CardContent className="flex items-center gap-4">
+              <Shimmer className="h-10 w-10 rounded-xl" />
+              <div className="flex-1">
+                <Shimmer className="h-3 w-16" />
+                <Shimmer className="mt-2 h-7 w-10" />
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      {/* 풋옵션 행사 가능 종목 (가로 전체) */}
+      <Card className="border-red-100">
+        <CardHeader>
+          <Shimmer className="h-4 w-48" />
+        </CardHeader>
+        <CardContent className="py-3">
+          <div className="flex flex-wrap gap-2">
+            <Shimmer className="h-9 w-64" />
+            <Shimmer className="h-9 w-56" />
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* 최근 알림 | 주가 변동 */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {[0, 1].map((i) => (
+          <Card key={i}>
+            <CardHeader>
+              <Shimmer className="h-4 w-28" />
+            </CardHeader>
+            <div className="divide-y divide-gray-50">
+              {[0, 1, 2, 3, 4].map((j) => (
+                <div key={j} className="px-5 py-3 flex items-start gap-3">
+                  <Shimmer className="h-5 w-10 flex-shrink-0" />
+                  <div className="flex-1">
+                    <Shimmer className="h-4 w-full max-w-xs" />
+                    <Shimmer className="mt-1.5 h-3 w-28" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Card>
+        ))}
+      </div>
+
+      {/* 뉴스 | 공시 */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {[0, 1].map((i) => (
+          <Card key={i}>
+            <CardHeader>
+              <Shimmer className="h-4 w-32" />
+            </CardHeader>
+            <div className="divide-y divide-gray-50">
+              {[0, 1, 2].map((j) => (
+                <div key={j} className="px-5 py-3">
+                  <Shimmer className="h-3 w-40" />
+                  <Shimmer className="mt-2 h-4 w-full" />
+                </div>
+              ))}
+            </div>
+          </Card>
+        ))}
+      </div>
+    </div>
   );
 }

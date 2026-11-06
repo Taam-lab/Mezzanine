@@ -117,108 +117,104 @@ export default function EditPositionPage() {
 
   if (loading) {
     return (
-      <>
-        <div className="flex items-center justify-center py-20">
-          <div className="animate-spin h-8 w-8 border-4 border-[#0A2A5E] border-t-transparent rounded-full" />
-        </div>
-      </>
+      <div className="flex items-center justify-center py-20">
+        <div className="animate-spin h-8 w-8 border-4 border-[#0A2A5E] border-t-transparent rounded-full" />
+      </div>
     );
   }
 
   return (
-    <>
-      <div className="max-w-4xl mx-auto space-y-5">
-        <div className="flex items-center gap-3">
-          <Link href={`/positions/${params.id}`}>
-            <Button variant="ghost" size="sm">
-              <ArrowLeft className="h-4 w-4" />
-              취소
-            </Button>
-          </Link>
-          <h1 className="text-xl font-bold text-gray-900">종목 수정</h1>
-        </div>
-
-        {saveError && (
-          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-            {saveError}
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit(onSubmit, onInvalid)} className="space-y-5">
-          <Card>
-            <CardHeader><CardTitle>기본 정보</CardTitle></CardHeader>
-            <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Input label="메자닌 자산명" error={errors.assetName?.message} {...register("assetName")} />
-              <Input label="채권종목번호" {...register("bondCode")} />
-              <Input label="기초자산 종목코드" maxLength={6} error={errors.underlyingTicker?.message} {...register("underlyingTicker")} />
-              <Input label="기초자산 회사명" error={errors.underlyingCompanyName?.message} {...register("underlyingCompanyName")} />
-              <Select
-                label="상장 시장"
-                options={[{ value: "KOSPI", label: "KOSPI" }, { value: "KOSDAQ", label: "KOSDAQ" }]}
-                {...register("underlyingMarket")}
-              />
-              <Select
-                label="메자닌 형태"
-                options={Object.entries(MEZZANINE_TYPE_LABEL).map(([v, l]) => ({ value: v, label: l }))}
-                {...register("mezzanineType")}
-              />
-              <Select
-                label="직접/간접 투자"
-                options={Object.entries(INVESTMENT_TYPE_LABEL).map(([v, l]) => ({ value: v, label: l }))}
-                {...register("investmentType")}
-              />
-              <Input label="투자금액 (원)" type="number" {...register("investmentAmount", { valueAsNumber: true })} />
-              <Input label="발행총액 (원)" type="number" {...register("issueAmount", { valueAsNumber: true })} />
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader><CardTitle>발행 조건</CardTitle></CardHeader>
-            <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Input label="발행일" type="date" {...register("issueDate")} />
-              <Input label="만기일" type="date" {...register("maturityDate")} />
-              <Input label="표면금리 (%)" type="number" step="0.001" {...register("couponRate", { valueAsNumber: true })} />
-              <Input label="YTM (%)" type="number" step="0.001" {...register("ytm", { valueAsNumber: true })} />
-              <Input label="회차" type="number" {...register("seriesNumber", { valueAsNumber: true })} />
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader><CardTitle>전환 조건</CardTitle></CardHeader>
-            <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Input label="최초 전환가" type="number" step="0.01" {...register("initialConversionPrice", { valueAsNumber: true })} />
-              <Input label="최저 전환가" type="number" step="0.01" {...register("minConversionPrice", { valueAsNumber: true })} />
-              <Input label="현재 전환가" type="number" step="0.01" {...register("currentConversionPrice", { valueAsNumber: true })} />
-              <Input label="전환 가능 시작일" type="date" {...register("conversionStartDate")} />
-              <Input label="전환 가능 종료일" type="date" {...register("conversionEndDate")} />
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader><CardTitle>Put Option (조기상환청구권)</CardTitle></CardHeader>
-            <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Input label="Put 시작일" type="date" {...register("putOptionStartDate")} />
-              <Input label="Put 종료일" type="date" {...register("putOptionEndDate")} />
-              <Input label="Put 수익률 (%)" type="number" step="0.001" {...register("putOptionRate", { valueAsNumber: true })} />
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader><CardTitle>Call Option (매도청구권)</CardTitle></CardHeader>
-            <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Input label="Call 시작일" type="date" {...register("callOptionStartDate")} />
-              <Input label="Call 종료일" type="date" {...register("callOptionEndDate")} />
-              <Input label="Call 비율 (%)" type="number" step="0.001" {...register("callOptionRatio", { valueAsNumber: true })} />
-              <Input label="Call 이율 (%)" type="number" step="0.001" {...register("callOptionRate", { valueAsNumber: true })} />
-            </CardContent>
-          </Card>
-
-          <div className="flex justify-end gap-3 pb-6">
-            <Link href={`/positions/${params.id}`}><Button variant="outline">취소</Button></Link>
-            <Button type="submit" variant="primary" loading={saving}>저장</Button>
-          </div>
-        </form>
+    <div className="max-w-4xl mx-auto space-y-5">
+      <div className="flex items-center gap-3">
+        <Link href={`/positions/${params.id}`}>
+          <Button variant="ghost" size="sm">
+            <ArrowLeft className="h-4 w-4" />
+            취소
+          </Button>
+        </Link>
+        <h1 className="text-xl font-bold text-gray-900">종목 수정</h1>
       </div>
-    </>
+
+      {saveError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          {saveError}
+        </div>
+      )}
+
+      <form onSubmit={handleSubmit(onSubmit, onInvalid)} className="space-y-5">
+        <Card>
+          <CardHeader><CardTitle>기본 정보</CardTitle></CardHeader>
+          <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Input label="메자닌 자산명" error={errors.assetName?.message} {...register("assetName")} />
+            <Input label="채권종목번호" {...register("bondCode")} />
+            <Input label="기초자산 종목코드" maxLength={6} error={errors.underlyingTicker?.message} {...register("underlyingTicker")} />
+            <Input label="기초자산 회사명" error={errors.underlyingCompanyName?.message} {...register("underlyingCompanyName")} />
+            <Select
+              label="상장 시장"
+              options={[{ value: "KOSPI", label: "KOSPI" }, { value: "KOSDAQ", label: "KOSDAQ" }]}
+              {...register("underlyingMarket")}
+            />
+            <Select
+              label="메자닌 형태"
+              options={Object.entries(MEZZANINE_TYPE_LABEL).map(([v, l]) => ({ value: v, label: l }))}
+              {...register("mezzanineType")}
+            />
+            <Select
+              label="직접/간접 투자"
+              options={Object.entries(INVESTMENT_TYPE_LABEL).map(([v, l]) => ({ value: v, label: l }))}
+              {...register("investmentType")}
+            />
+            <Input label="투자금액 (원)" type="number" {...register("investmentAmount", { valueAsNumber: true })} />
+            <Input label="발행총액 (원)" type="number" {...register("issueAmount", { valueAsNumber: true })} />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader><CardTitle>발행 조건</CardTitle></CardHeader>
+          <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Input label="발행일" type="date" {...register("issueDate")} />
+            <Input label="만기일" type="date" {...register("maturityDate")} />
+            <Input label="표면금리 (%)" type="number" step="0.001" {...register("couponRate", { valueAsNumber: true })} />
+            <Input label="YTM (%)" type="number" step="0.001" {...register("ytm", { valueAsNumber: true })} />
+            <Input label="회차" type="number" {...register("seriesNumber", { valueAsNumber: true })} />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader><CardTitle>전환 조건</CardTitle></CardHeader>
+          <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Input label="최초 전환가" type="number" step="0.01" {...register("initialConversionPrice", { valueAsNumber: true })} />
+            <Input label="최저 전환가" type="number" step="0.01" {...register("minConversionPrice", { valueAsNumber: true })} />
+            <Input label="현재 전환가" type="number" step="0.01" {...register("currentConversionPrice", { valueAsNumber: true })} />
+            <Input label="전환 가능 시작일" type="date" {...register("conversionStartDate")} />
+            <Input label="전환 가능 종료일" type="date" {...register("conversionEndDate")} />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader><CardTitle>Put Option (조기상환청구권)</CardTitle></CardHeader>
+          <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Input label="Put 시작일" type="date" {...register("putOptionStartDate")} />
+            <Input label="Put 종료일" type="date" {...register("putOptionEndDate")} />
+            <Input label="Put 수익률 (%)" type="number" step="0.001" {...register("putOptionRate", { valueAsNumber: true })} />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader><CardTitle>Call Option (매도청구권)</CardTitle></CardHeader>
+          <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Input label="Call 시작일" type="date" {...register("callOptionStartDate")} />
+            <Input label="Call 종료일" type="date" {...register("callOptionEndDate")} />
+            <Input label="Call 비율 (%)" type="number" step="0.001" {...register("callOptionRatio", { valueAsNumber: true })} />
+            <Input label="Call 이율 (%)" type="number" step="0.001" {...register("callOptionRate", { valueAsNumber: true })} />
+          </CardContent>
+        </Card>
+
+        <div className="flex justify-end gap-3 pb-6">
+          <Link href={`/positions/${params.id}`}><Button variant="outline">취소</Button></Link>
+          <Button type="submit" variant="primary" loading={saving}>저장</Button>
+        </div>
+      </form>
+    </div>
   );
 }

@@ -121,139 +121,137 @@ export default function AdminIntegrationsPage() {
   }
 
   return (
-    <>
-      <div className="space-y-5 max-w-3xl">
-        <h1 className="text-xl font-bold text-gray-900">API 키 관리</h1>
-        <p className="text-sm text-gray-600">
-          API 키를 등록하면 시스템이 자동으로 해당 소스로 전환됩니다. 키는 AES-256으로 암호화하여 저장됩니다.
-        </p>
+    <div className="space-y-5 max-w-3xl">
+      <h1 className="text-xl font-bold text-gray-900">API 키 관리</h1>
+      <p className="text-sm text-gray-600">
+        API 키를 등록하면 시스템이 자동으로 해당 소스로 전환됩니다. 키는 AES-256으로 암호화하여 저장됩니다.
+      </p>
 
-        {Object.entries(SERVICE_CONFIG).map(([serviceName, config]) => {
-          const integration = integrations[serviceName];
-          const isRegistered = integration?.isEnabled;
+      {Object.entries(SERVICE_CONFIG).map(([serviceName, config]) => {
+        const integration = integrations[serviceName];
+        const isRegistered = integration?.isEnabled;
 
-          return (
-            <Card key={serviceName}>
-              <CardHeader>
-                <div className="flex items-center gap-3">
-                  <div>
-                    <CardTitle>{config.label}</CardTitle>
-                    <p className="text-xs text-gray-500 mt-0.5">{config.description}</p>
-                  </div>
-                  <div className="ml-auto flex items-center gap-2">
-                    {isRegistered ? (
-                      <div className="flex items-center gap-1.5 text-green-600 text-xs font-medium">
-                        <CheckCircle2 className="h-4 w-4" />
-                        등록됨
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-1.5 text-gray-400 text-xs">
-                        <AlertCircle className="h-4 w-4" />
-                        미등록
-                      </div>
-                    )}
-                  </div>
+        return (
+          <Card key={serviceName}>
+            <CardHeader>
+              <div className="flex items-center gap-3">
+                <div>
+                  <CardTitle>{config.label}</CardTitle>
+                  <p className="text-xs text-gray-500 mt-0.5">{config.description}</p>
                 </div>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2">
-                  📋 {config.fallbackDesc}
-                </div>
-
-                {isRegistered && integration.lastValidatedAt && (
-                  <p className="text-xs text-green-600">
-                    마지막 검증: {formatDateTime(integration.lastValidatedAt)}
-                  </p>
-                )}
-
-                <div className="space-y-3">
-                  {config.fields.map((field) => (
-                    <div key={field.key} className="flex gap-2 items-start">
-                      <div className="flex-1">
-                        <label className="text-xs font-medium text-gray-600 mb-1 block">
-                          {field.label}
-                          {isRegistered && integration.fields[field.key] && (
-                            <span className="ml-2 text-gray-400 font-normal">
-                              현재: {integration.fields[field.key]}
-                            </span>
-                          )}
-                        </label>
-                        <input
-                          type={showFields[`${serviceName}-${field.key}`] ? "text" : "password"}
-                          placeholder={field.placeholder}
-                          value={forms[serviceName]?.[field.key] || ""}
-                          onChange={(e) => updateForm(serviceName, field.key, e.target.value)}
-                          className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-[#0A2A5E] focus:ring-1 focus:ring-[#0A2A5E]"
-                        />
-                      </div>
-                      <button
-                        onClick={() =>
-                          setShowFields((p) => ({
-                            ...p,
-                            [`${serviceName}-${field.key}`]: !p[`${serviceName}-${field.key}`],
-                          }))
-                        }
-                        className="mt-6 p-2 text-gray-400 hover:text-gray-600"
-                      >
-                        {showFields[`${serviceName}-${field.key}`] ? (
-                          <EyeOff className="h-4 w-4" />
-                        ) : (
-                          <Eye className="h-4 w-4" />
-                        )}
-                      </button>
+                <div className="ml-auto flex items-center gap-2">
+                  {isRegistered ? (
+                    <div className="flex items-center gap-1.5 text-green-600 text-xs font-medium">
+                      <CheckCircle2 className="h-4 w-4" />
+                      등록됨
                     </div>
-                  ))}
-                </div>
-
-                <div className="flex justify-end gap-2 pt-1">
-                  {serviceName === "telegram" && isRegistered && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={async () => {
-                        const res = await fetch("/api/admin/integrations", {
-                          method: "PUT",
-                          headers: {
-                            "Content-Type": "application/json",
-                            "x-admin-password": getAdminPwd(),
-                          },
-                          body: JSON.stringify({
-                            serviceName: "telegram",
-                            action: "test",
-                          }),
-                        });
-                        const data = await res.json().catch(() => ({}));
-                        if (res.ok) alert("텔레그램 테스트 메시지 발송됨. 확인해보세요.");
-                        else alert(`발송 실패: ${data.error ?? res.status}`);
-                      }}
-                    >
-                      테스트 발송
-                    </Button>
+                  ) : (
+                    <div className="flex items-center gap-1.5 text-gray-400 text-xs">
+                      <AlertCircle className="h-4 w-4" />
+                      미등록
+                    </div>
                   )}
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2">
+                📋 {config.fallbackDesc}
+              </div>
+
+              {isRegistered && integration.lastValidatedAt && (
+                <p className="text-xs text-green-600">
+                  마지막 검증: {formatDateTime(integration.lastValidatedAt)}
+                </p>
+              )}
+
+              <div className="space-y-3">
+                {config.fields.map((field) => (
+                  <div key={field.key} className="flex gap-2 items-start">
+                    <div className="flex-1">
+                      <label className="text-xs font-medium text-gray-600 mb-1 block">
+                        {field.label}
+                        {isRegistered && integration.fields[field.key] && (
+                          <span className="ml-2 text-gray-400 font-normal">
+                            현재: {integration.fields[field.key]}
+                          </span>
+                        )}
+                      </label>
+                      <input
+                        type={showFields[`${serviceName}-${field.key}`] ? "text" : "password"}
+                        placeholder={field.placeholder}
+                        value={forms[serviceName]?.[field.key] || ""}
+                        onChange={(e) => updateForm(serviceName, field.key, e.target.value)}
+                        className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-[#0A2A5E] focus:ring-1 focus:ring-[#0A2A5E]"
+                      />
+                    </div>
+                    <button
+                      onClick={() =>
+                        setShowFields((p) => ({
+                          ...p,
+                          [`${serviceName}-${field.key}`]: !p[`${serviceName}-${field.key}`],
+                        }))
+                      }
+                      className="mt-6 p-2 text-gray-400 hover:text-gray-600"
+                    >
+                      {showFields[`${serviceName}-${field.key}`] ? (
+                        <EyeOff className="h-4 w-4" />
+                      ) : (
+                        <Eye className="h-4 w-4" />
+                      )}
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex justify-end gap-2 pt-1">
+                {serviceName === "telegram" && isRegistered && (
                   <Button
                     size="sm"
-                    variant="primary"
-                    onClick={() => saveIntegration(serviceName)}
-                    loading={saving[serviceName]}
+                    variant="outline"
+                    onClick={async () => {
+                      const res = await fetch("/api/admin/integrations", {
+                        method: "PUT",
+                        headers: {
+                          "Content-Type": "application/json",
+                          "x-admin-password": getAdminPwd(),
+                        },
+                        body: JSON.stringify({
+                          serviceName: "telegram",
+                          action: "test",
+                        }),
+                      });
+                      const data = await res.json().catch(() => ({}));
+                      if (res.ok) alert("텔레그램 테스트 메시지 발송됨. 확인해보세요.");
+                      else alert(`발송 실패: ${data.error ?? res.status}`);
+                    }}
                   >
-                    {saved[serviceName] ? (
-                      <>
-                        <CheckCircle2 className="h-4 w-4" />
-                        저장됨
-                      </>
-                    ) : (
-                      <>
-                        <Save className="h-4 w-4" />
-                        저장
-                      </>
-                    )}
+                    테스트 발송
                   </Button>
-                </div>
-              </CardContent>
-            </Card>
-          );
-        })}
-      </div>
-    </>
+                )}
+                <Button
+                  size="sm"
+                  variant="primary"
+                  onClick={() => saveIntegration(serviceName)}
+                  loading={saving[serviceName]}
+                >
+                  {saved[serviceName] ? (
+                    <>
+                      <CheckCircle2 className="h-4 w-4" />
+                      저장됨
+                    </>
+                  ) : (
+                    <>
+                      <Save className="h-4 w-4" />
+                      저장
+                    </>
+                  )}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })}
+    </div>
   );
 }
