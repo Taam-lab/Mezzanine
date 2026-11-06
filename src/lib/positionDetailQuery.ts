@@ -13,11 +13,6 @@ import { prisma } from "@/lib/prisma";
  * 상세 화면이 렌더하지 않는 owner 조인과 컬럼(disclosure.parsedData 등)은 읽지 않는다.
  */
 const DETAIL_INCLUDE = {
-  priceSnapshots: {
-    select: { id: true, price: true, changeRate: true, snapshotAt: true },
-    orderBy: { snapshotAt: "desc" },
-    take: 30,
-  },
   // checkId 별 최신 1건
   riskCheckResults: {
     select: { checkId: true, status: true, checkedAt: true },
@@ -112,12 +107,35 @@ function toPlain<T>(value: unknown): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
+/**
+ * 주가 차트용: KST 날짜별 마지막 스냅샷 1건씩, 최근 30일치 (최신순).
+ *
+ * 예전엔 "최근 스냅샷 30건"이었는데, 스냅샷은 워커가 장중 5분마다, 상세 화면이
+ * 열릴 때마다 쌓는다. 그래서 30건이 대부분 같은 날의 몇 분 간격 값이었고, x축 라벨
+ * (MM/DD)이 같은 날짜로 줄줄이 찍혔다. snapshot_at 은 UTC 로 저장되므로 KST 로
+ * 바꿔서 날짜를 자른다. 첫 행은 여전히 가장 최근 스냅샷이다 (현재가 폴백용).
+ */
+function dailySnapshotsQuery(positionId: string) {
+  return prisma.$queryRaw<
+    Array<{ id: string; price: number; changeRate: number | null; snapshotAt: Date }>
+  >`
+    SELECT DISTINCT ON ((snapshot_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Seoul')::date)
+           id, price, change_rate AS "changeRate", snapshot_at AS "snapshotAt"
+      FROM price_snapshots
+     WHERE position_id = ${positionId}
+       AND snapshot_at >= (now() AT TIME ZONE 'UTC') - interval '45 days'
+     ORDER BY (snapshot_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Seoul')::date DESC,
+              snapshot_at DESC
+     LIMIT 30`;
+}
+
 export async function getPositionDetail(id: string): Promise<PositionDetail | null> {
-  const row = await prisma.position.findUnique({
-    where: { id },
-    include: DETAIL_INCLUDE,
-  });
-  return row ? toPlain<PositionDetail>(row) : null;
+  // 배치 트랜잭션 하나로 묶어 pgbouncer 래핑(BEGIN/DEALLOCATE/COMMIT)을 한 번만 탄다.
+  const [row, priceSnapshots] = await prisma.$transaction([
+    prisma.position.findUnique({ where: { id }, include: DETAIL_INCLUDE }),
+    dailySnapshotsQuery(id),
+  ]);
+  return row ? toPlain<PositionDetail>({ ...row, priceSnapshots }) : null;
 }
 
 /** 수정 폼용 — 관계 없이 종목 행 하나만. */

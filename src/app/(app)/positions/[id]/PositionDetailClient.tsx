@@ -185,10 +185,15 @@ export default function PositionDetailClient({ position }: { position: PositionD
 
   const ticker = position.underlyingTicker;
 
-  async function refreshPrice(t: string) {
+  // save: 이 조회를 DB 스냅샷으로도 남길지. 화면 진입 때 한 번만 남기고
+  // 60초 자동 갱신·수동 새로고침은 시세만 받는다.
+  async function refreshPrice(t: string, save = false) {
     setRefreshingPrice(true);
     try {
-      const res = await fetch(`/api/prices/${t}?t=${Date.now()}`, { cache: "no-store" });
+      const res = await fetch(
+        `/api/prices/${t}?t=${Date.now()}${save ? "" : "&save=false"}`,
+        { cache: "no-store" },
+      );
       if (res.ok) {
         const data = await res.json();
         setLivePrice({
@@ -207,7 +212,7 @@ export default function PositionDetailClient({ position }: { position: PositionD
   // 시세는 마운트 즉시 + 60초마다 네이버에서 갱신 (DB 스냅샷은 그 전까지의 폴백).
   useEffect(() => {
     if (!/^\d{6}$/.test(ticker)) return;
-    refreshPrice(ticker);
+    refreshPrice(ticker, true);
     const id = setInterval(() => refreshPrice(ticker), 60_000);
     return () => clearInterval(id);
   }, [ticker]);

@@ -6,9 +6,12 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: { ticker: string } },
 ) {
+  // save=false: 시세만 반환하고 스냅샷은 쓰지 않는다. 상세 화면의 60초 자동 갱신이
+  // 매번 스냅샷을 쌓아 탭 하나에 하루 수백 행씩 늘던 것을 막는다.
+  const skipSave = new URL(req.url).searchParams.get("save") === "false";
   const ticker = params.ticker?.trim();
   if (!ticker || !/^\d{6}$/.test(ticker)) {
     return NextResponse.json(
@@ -19,6 +22,7 @@ export async function GET(
 
   try {
     const quote = await fetchNaverQuote(ticker);
+    if (skipSave) return NextResponse.json({ ...quote, savedFor: 0 });
 
     const positions = await prisma.position.findMany({
       where: { underlyingTicker: ticker, isActive: true },
