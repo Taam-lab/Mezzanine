@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { positionSchema } from "@/lib/validations";
+import { NULLABLE_POSITION_FIELDS, positionSchema } from "@/lib/validations";
 import { getPositionDetail } from "@/lib/positionDetailQuery";
 
 export const dynamic = "force-dynamic";
@@ -16,8 +16,18 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
 
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const body = await req.json();
-    const parsed = positionSchema.partial().safeParse(body);
+    const body = (await req.json()) as Record<string, unknown>;
+
+    // null = "이 칸을 비워라" (수정 폼이 지운 칸). 스키마는 null 을 받지 않으므로
+    // 비울 수 있는 컬럼의 null 만 따로 빼 두고 나머지만 검증한다.
+    const nullable = new Set<string>(NULLABLE_POSITION_FIELDS);
+    const cleared: Record<string, null> = {};
+    const rest: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(body)) {
+      if (value === null && nullable.has(key)) cleared[key] = null;
+      else rest[key] = value;
+    }
+    const parsed = positionSchema.partial().safeParse(rest);
 
     if (!parsed.success) {
       return NextResponse.json({ error: parsed.error.issues[0].message }, { status: 400 });
@@ -42,6 +52,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
         issueAmount: data.issueAmount
           ? BigInt(Math.floor(data.issueAmount))
           : undefined,
+        ...cleared,
       },
     });
 

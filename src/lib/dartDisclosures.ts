@@ -15,12 +15,16 @@ export interface DartDisclosure {
   reportName: string;
 }
 
-function pad2(n: number | string): string {
-  return String(n).padStart(2, "0");
-}
-
-function fmtYmd(d: Date): string {
-  return `${d.getFullYear()}${pad2(d.getMonth() + 1)}${pad2(d.getDate())}`;
+/**
+ * 오늘(KST)에서 daysAgo 일 전 날짜를 YYYYMMDD 로.
+ *
+ * DART 의 rcept_dt 는 한국 날짜다. 서버(Vercel)는 UTC 라서 로컬 getDate() 로
+ * 범위를 잡으면 KST 00~09시에는 end_de 가 "어제"가 되어, 그날 아침 일찍 접수된
+ * 공시가 09시까지 조회 범위 밖에 있었다.
+ */
+function kstYmd(daysAgo = 0): string {
+  const kst = new Date(Date.now() + 9 * 3600_000 - daysAgo * 86_400_000);
+  return kst.toISOString().slice(0, 10).replace(/-/g, "");
 }
 
 /**
@@ -32,10 +36,7 @@ export async function fetchDartDisclosuresByCorpCode(
   apiKey: string,
   days = 30,
 ): Promise<DartDisclosure[]> {
-  const end = new Date();
-  const bgn = new Date();
-  bgn.setDate(bgn.getDate() - days);
-  const url = `${DART_BASE}/list.json?crtfc_key=${apiKey}&corp_code=${corpCode}&bgn_de=${fmtYmd(bgn)}&end_de=${fmtYmd(end)}&page_count=100&page_no=1`;
+  const url = `${DART_BASE}/list.json?crtfc_key=${apiKey}&corp_code=${corpCode}&bgn_de=${kstYmd(days)}&end_de=${kstYmd(0)}&page_count=100&page_no=1`;
   try {
     const res = await fetch(url, {
       signal: AbortSignal.timeout(5000),

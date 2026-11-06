@@ -166,14 +166,19 @@ function compareValues(a: unknown, b: unknown, dir: SortDir): number {
  */
 export default function PositionsClient({
   initialPositions,
+  initialSearch = "",
 }: {
   initialPositions: Position[];
+  initialSearch?: string;
 }) {
   const router = useRouter();
   const [positions, setPositions] = useState<Position[]>(initialPositions);
   // 서버가 이미 목록을 채워줬으므로 첫 렌더에서 스피너를 띄우지 않는다.
   const [loading, setLoading] = useState(initialPositions.length === 0);
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(initialSearch);
+  // 이미 목록 화면에 있는 상태에서 헤더로 다시 검색하면 같은 컴포넌트가 새 props 만
+  // 받는다 — 검색칸을 그 값으로 맞춘다.
+  useEffect(() => setSearch(initialSearch), [initialSearch]);
   const [livePrices, setLivePrices] = useState<Record<string, LiveQuote>>({});
   const [refreshing, setRefreshing] = useState(false);
   const [priceError, setPriceError] = useState<string | null>(null);

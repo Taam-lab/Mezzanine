@@ -119,12 +119,20 @@ export async function GET(req: NextRequest) {
         disclosures = await scrapeNaverDisclosures(ticker);
         stat.source = "NAVER";
       }
-      const candidates = disclosures.filter((d) => isAdjustmentDisclosure(d.title));
+      // DART 목록은 최신순이다. 예전엔 그 순서대로 처리하면서 매번 "처음 읽어 둔"
+      // 전환가와 비교했기 때문에, 미처리 조정 공시가 2건 이상이면(신규 등록 종목,
+      // 리픽싱이 여러 번 있었던 CB) 마지막에 처리된 가장 오래된 조정가가
+      // currentConversionPrice 로 남았다. 오래된 것부터 적용하고, 적용할 때마다
+      // 아래에서 matched.currentConversionPrice 를 갱신해 다음 비교의 기준으로 쓴다.
+      // rcpNo 는 접수일(YYYYMMDD) + 일련번호라 문자열 정렬이 곧 시간순이다.
+      const candidates = disclosures
+        .filter((d) => isAdjustmentDisclosure(d.title))
+        .map((disc) => ({ disc, rcpNo: disc.rcpNo || extractRcpNo(disc.url) }))
+        .filter((c): c is { disc: DartDisclosure; rcpNo: string } => Boolean(c.rcpNo))
+        .sort((a, b) => (a.rcpNo < b.rcpNo ? -1 : a.rcpNo > b.rcpNo ? 1 : 0));
 
-      for (const disc of candidates) {
+      for (const { disc, rcpNo } of candidates) {
         stat.processed++;
-        const rcpNo = disc.rcpNo || extractRcpNo(disc.url);
-        if (!rcpNo) continue;
 
         const existing = await prisma.disclosure.findUnique({
           where: { rceptNo: rcpNo },
@@ -172,6 +180,10 @@ export async function GET(req: NextRequest) {
           continue;
         }
 
+        // 지난 조정(신규 등록 직후 스캔에 걸린 몇 달 전 리픽싱 등)도 이력·전환가에는
+        // 반영하되, 긴급 알림·텔레그램은 최근 접수분만 — 대시보드 공시 알림과 같은 원칙.
+        const notify = isRecentFiling(rcpNo);
+
         await prisma.$transaction(async (tx) => {
           const disclosureRow = await tx.disclosure.create({
             data: {
@@ -201,6 +213,7 @@ export async function GET(req: NextRequest) {
             where: { id: matched.id },
             data: { currentConversionPrice: parsed.newPrice as number },
           });
+          if (!notify) return;
           await tx.alert.create({
             data: {
               positionId: matched.id,
@@ -215,6 +228,11 @@ export async function GET(req: NextRequest) {
           });
         });
 
+        // 다음 조정 공시는 방금 적용한 가격과 비교한다.
+        matched.currentConversionPrice = parsed.newPrice;
+        stat.updated++;
+        if (!notify) continue;
+
         sendTelegramAlert({
           severity: "CRITICAL",
           title: `[${matched.underlyingCompanyName} ${matched.seriesNumber ?? ""}회 ${matched.mezzanineType}] 전환가액 조정`,
@@ -223,8 +241,6 @@ export async function GET(req: NextRequest) {
           }${parsed.adjustedAt ? `\n적용일: ${parsed.adjustedAt}` : ""}`,
           sourceUrl: disc.url,
         }).catch(() => {});
-
-        stat.updated++;
       }
     } catch (e) {
       stat.errors.push(`ticker ${ticker}: ${(e as Error).message.slice(0, 80)}`);
@@ -300,6 +316,16 @@ async function scrapeNaverDisclosures(ticker: string): Promise<DartDisclosure[]>
     }
   }
   return items;
+}
+
+/** 알림을 보낼 만큼 최근 접수된 공시인지 (KST 기준 최근 7일). */
+const NOTIFY_WITHIN_DAYS = 7;
+function isRecentFiling(rcpNo: string): boolean {
+  const cutoff = new Date(Date.now() + 9 * 3600_000 - NOTIFY_WITHIN_DAYS * 86_400_000)
+    .toISOString()
+    .slice(0, 10)
+    .replace(/-/g, "");
+  return rcpNo.slice(0, 8) >= cutoff;
 }
 
 function extractRcpNo(url: string): string | null {

@@ -9,7 +9,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { ArrowLeft } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { positionSchema, type PositionInput } from "@/lib/validations";
+import {
+  NULLABLE_POSITION_FIELDS,
+  positionSchema,
+  type PositionInput,
+} from "@/lib/validations";
 import { MEZZANINE_TYPE_LABEL, INVESTMENT_TYPE_LABEL } from "@/lib/utils";
 import { useNavigateFresh } from "@/lib/useNavigateFresh";
 
@@ -82,23 +86,32 @@ export default function EditPositionClient({
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
+  const defaults = toFormValues(initial);
   const {
     register,
     handleSubmit,
     formState: { errors },
   } = useForm<PositionInput>({
     resolver: zodResolver(positionSchema),
-    defaultValues: toFormValues(initial),
+    defaultValues: defaults,
   });
 
   async function onSubmit(data: PositionInput) {
     setSaving(true);
     setSaveError(null);
     try {
+      // 비운 칸은 null 로 명시해 보낸다. undefined 는 JSON 에서 빠져서 서버가
+      // "변경 없음"으로 처리했다 (지운 값이 저장 후에도 남던 버그).
+      // 이 폼이 다루는 필드만 대상 — 폼에 없는 컬럼(corpCode 등)은 건드리지 않는다.
+      const body: Record<string, unknown> = { ...data };
+      for (const key of NULLABLE_POSITION_FIELDS) {
+        if (!(key in defaults)) continue;
+        if (body[key] === undefined || body[key] === "") body[key] = null;
+      }
       const res = await fetch(`/api/positions/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
+        body: JSON.stringify(body),
       });
       if (res.ok) {
         // 상세 페이지는 30초 라우터 캐시에 옛 값으로 남아 있을 수 있다 —

@@ -25,7 +25,10 @@ async def lifespan(app: FastAPI):
     # 스케줄러 시작
     scheduler.add_job(poll_disclosures, "interval", minutes=POLLING_INTERVAL, id="poll_disclosures")
     scheduler.add_job(poll_prices_realtime, "interval", minutes=POLLING_INTERVAL, id="poll_prices")
-    scheduler.add_job(daily_price_close, "cron", hour=16, minute=30, id="daily_close")
+    # 평일만 — 주말에 돌면 직전 금요일 종가를 새 스냅샷으로 또 쌓았다.
+    scheduler.add_job(
+        daily_price_close, "cron", day_of_week="mon-fri", hour=16, minute=30, id="daily_close"
+    )
     scheduler.start()
     print(f"[Worker] 스케줄러 시작 — 폴링 주기: {POLLING_INTERVAL}분")
     yield

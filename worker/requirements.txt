@@ -5,7 +5,10 @@ beautifulsoup4==4.12.3
 pdfplumber==0.11.4
 python-multipart==0.0.18
 apscheduler==3.10.4
-sqlalchemy==2.0.36
+# [asyncio] extra = greenlet. AsyncSession 은 greenlet 없이는 첫 쿼리에서 죽는데,
+# SQLAlchemy 2.0.36 은 Python 3.13 이상에서 greenlet 을 자동으로 깔지 않는다
+# (Dockerfile 의 3.11 에선 우연히 깔린다). 베이스 이미지를 올려도 안 깨지게 명시.
+sqlalchemy[asyncio]==2.0.36
 aiosqlite==0.20.0
 python-dotenv==1.0.1
 pykrx==1.0.48

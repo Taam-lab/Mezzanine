@@ -7,7 +7,14 @@ import PositionsClient from "./PositionsClient";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-export default async function PositionsPage() {
+export default async function PositionsPage({
+  searchParams,
+}: {
+  searchParams: { q?: string };
+}) {
   const initialPositions = await getPositionList(true);
-  return <PositionsClient initialPositions={initialPositions} />;
+  // ?q= 는 헤더 검색창에서 넘어온 검색어 — 목록 검색칸의 초기값이 된다.
+  return (
+    <PositionsClient initialPositions={initialPositions} initialSearch={searchParams.q ?? ""} />
+  );
 }

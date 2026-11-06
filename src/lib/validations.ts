@@ -76,6 +76,41 @@ export const positionSchema = z.object({
   note: z.string().optional(),
 });
 
+/**
+ * DB 에서 비울 수 있는(nullable) 종목 컬럼.
+ *
+ * 수정 폼에서 칸을 지우면 zod 변환 뒤 undefined 가 되고, JSON 에서 빠진 키를
+ * Prisma 는 "변경 없음"으로 처리한다 — 저장은 성공했다고 뜨는데 지운 값이 그대로
+ * 남았다. 그래서 폼은 지운 칸을 null 로 보내고, PATCH 는 이 목록에 있는 키의 null 만
+ * 받아서 컬럼을 비운다. (필수 컬럼을 null 로 만들 수는 없다.)
+ */
+export const NULLABLE_POSITION_FIELDS = [
+  "bondCode",
+  "issueDate",
+  "investmentAmount",
+  "issueAmount",
+  "maturityDate",
+  "couponRate",
+  "ytm",
+  "initialConversionPrice",
+  "minConversionPrice",
+  "currentConversionPrice",
+  "conversionStartDate",
+  "conversionEndDate",
+  "putOptionRate",
+  "putOptionStartDate",
+  "putOptionEndDate",
+  "putOptionSchedule",
+  "callOptionRatio",
+  "callOptionStartDate",
+  "callOptionEndDate",
+  "callOptionRate",
+  "seriesNumber",
+  "sourceDisclosureUrl",
+  "corpCode",
+  "note",
+] as const;
+
 export type SignupInput = z.infer<typeof signupSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 

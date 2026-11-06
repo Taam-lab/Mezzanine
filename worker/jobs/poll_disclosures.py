@@ -1,44 +1,65 @@
 """
 OpenDART 공시 폴링 Job
-- 5분마다 보유 종목의 신규 공시 수집
-- 전환가액 조정 공시 감지 시 자동 업데이트
-- 웹 푸시 알림 트리거
+- 5분마다 보유 종목의 오늘자 신규 공시를 disclosures / alerts 에 적재
+
+전환가액 조정 공시는 여기서 다루지 않는다 — 웹앱의 /api/dashboard/process-adjustments
+가 DART 뷰어 본문을 긁어 회차를 매칭하고 전환가·이력·알림을 갱신한다. 예전엔 이 잡이
+조정 공시를 disclosures 에 먼저 넣고(본문 대신 프레임셋 HTML 을 파싱해 실패), 그
+rcept_no 가 이미 있으니 웹앱 쪽은 "처리됨"으로 건너뛰어 전환가가 끝내 반영되지 않았다.
 """
 
 import os
+import re
+import json
 import asyncio
 import httpx
 from datetime import datetime, date
 from sqlalchemy import text
 
-from db import AsyncSessionLocal
-from parsers.disclosure import classify_disclosure, parse_conversion_price_adjustment
+from db import AsyncSessionLocal, utcnow
+from parsers.disclosure import classify_disclosure
+
+
+def is_adjustment_disclosure(title: str) -> bool:
+    """웹앱 src/lib/conversionAdjustExtract.ts 의 isAdjustmentDisclosure 와 같은 기준."""
+    return bool(
+        re.search(r"(?:전환|교환|청구)\s*가액.{0,10}?조정", title)
+        or re.search(r"전환가액의?\s*조정", title)
+        or re.search(r"리픽싱|refixing", title, re.IGNORECASE)
+    )
 
 DART_API_KEY = None  # DB에서 동적으로 로드
 NEXTJS_URL = os.getenv("NEXTJS_URL", "http://localhost:3000")
 
 
 async def get_dart_api_key(session) -> str | None:
+    """관리자 화면(API 키 관리 → OpenDART)에 등록된 키, 없으면 환경변수 DART_API_KEY.
+
+    예전엔 `is_enabled = 1` 이라 Postgres 에서 "operator does not exist:
+    boolean = integer" 로 첫 쿼리부터 죽었다 (is_active 만 고쳐지고 이건 남아 있었다).
+    또 render.yaml 은 DART_API_KEY 를 넘기는데 코드는 DB 만 봐서, 관리자 화면에
+    키를 따로 넣지 않으면 "API 키 없음"으로 스킵됐다.
+    """
     result = await session.execute(
-        text("SELECT credentials FROM integrations WHERE service_name = 'opendart' AND is_enabled = 1")
+        text("SELECT credentials FROM integrations WHERE service_name = 'opendart' AND is_enabled = true")
     )
     row = result.fetchone()
-    if not row or not row[0]:
-        return None
-    # 암호화된 키 복호화 (Next.js와 동일 로직)
-    from decrypt_util import decrypt_credentials
-    try:
-        creds = decrypt_credentials(row[0])
-        return creds.get("api_key")
-    except Exception:
-        return None
+    if row and row[0]:
+        # 암호화된 키 복호화 (Next.js와 동일 로직)
+        from decrypt_util import decrypt_credentials
+        try:
+            key = decrypt_credentials(row[0]).get("api_key")
+            if key:
+                return key
+        except Exception:
+            pass
+    return os.getenv("DART_API_KEY") or None
 
 
 async def get_active_positions(session) -> list[dict]:
     result = await session.execute(
         text("""
-            SELECT id, underlying_ticker, underlying_company_name,
-                   series_number, current_conversion_price
+            SELECT id, underlying_ticker, underlying_company_name, corp_code
             FROM positions
             WHERE is_active = true
         """)
@@ -49,8 +70,7 @@ async def get_active_positions(session) -> list[dict]:
             "id": row[0],
             "ticker": row[1],
             "company_name": row[2],
-            "series_number": row[3],
-            "current_conversion_price": row[4],
+            "corp_code": row[3],
         }
         for row in rows
     ]
@@ -99,31 +119,32 @@ async def fetch_new_disclosures(corp_code: str, api_key: str) -> list[dict]:
     return []
 
 
-async def save_disclosure_and_alert(session, position_id: str, disclosure: dict,
+async def save_disclosure_and_alert(session, position: dict, disclosure: dict,
                                      report_type: str, severity: str):
-    """공시 저장 및 알림 생성"""
+    """공시 저장 및 알림 생성.
+
+    rcept_no(공시)·(alert_type, source_url)(알림)이 UNIQUE 라, 대시보드가 같은 공시로
+    알림을 먼저 만들었거나 같은 티커의 다른 포지션에서 이미 넣었으면 INSERT 가
+    충돌한다. 예전엔 그 IntegrityError 가 폴링 루프 전체를 죽였다 — ON CONFLICT 로 넘긴다.
+    """
+    position_id = position["id"]
     rcept_no = disclosure.get("rcept_no", "")
     report_name = disclosure.get("report_nm", "")
     filed_at_str = disclosure.get("rcept_dt", datetime.now().strftime("%Y%m%d"))
     dart_url = f"https://dart.fss.or.kr/dsaf001/main.do?rcpNo={rcept_no}"
 
-    # 중복 체크
-    existing = await session.execute(
-        text("SELECT id FROM disclosures WHERE rcept_no = :rno"),
-        {"rno": rcept_no},
-    )
-    if existing.fetchone():
-        return  # 이미 처리됨
-
+    # 접수일 — 웹앱과 같은 관례로 그 날짜의 00:00 (tz 없는 값)
     filed_at = datetime.strptime(filed_at_str, "%Y%m%d")
 
     import uuid
     disc_id = str(uuid.uuid4())
-    await session.execute(
+    inserted = await session.execute(
         text("""
             INSERT INTO disclosures (id, position_id, rcept_no, corp_code, report_name,
                                      report_type, severity, filed_at, dart_url, created_at)
             VALUES (:id, :pid, :rno, :cc, :rname, :rtype, :sev, :fat, :url, :cat)
+            ON CONFLICT (rcept_no) DO NOTHING
+            RETURNING id
         """),
         {
             "id": disc_id,
@@ -135,27 +156,35 @@ async def save_disclosure_and_alert(session, position_id: str, disclosure: dict,
             "sev": severity,
             "fat": filed_at,
             "url": dart_url,
-            "cat": datetime.now(),
+            "cat": utcnow(),
         },
     )
+    if inserted.fetchone() is None:
+        await session.commit()
+        return None  # 이미 처리됨
 
-    # 알림 생성
-    alert_id = str(uuid.uuid4())
+    # 알림 생성 — 대시보드가 만드는 공시 알림과 같은 모양으로:
+    #   - 제목 "[회사명] 공시명"
+    #   - metadata.eventAt = 접수일. 웹앱의 정리 작업(api/alerts)은 metadata 가 없는
+    #     DISCLOSURE 알림을 "옛 형식"으로 보고 지우므로, 없으면 10분 안에 사라졌다.
+    event_at = f"{filed_at_str[0:4]}-{filed_at_str[4:6]}-{filed_at_str[6:8]}"
     await session.execute(
         text("""
             INSERT INTO alerts (id, position_id, alert_type, severity, title, body,
-                                source_url, created_at)
-            VALUES (:id, :pid, :atype, :sev, :title, :body, :url, :cat)
+                                source_url, metadata, created_at)
+            VALUES (:id, :pid, :atype, :sev, :title, :body, :url, :meta, :cat)
+            ON CONFLICT DO NOTHING
         """),
         {
-            "id": alert_id,
+            "id": str(uuid.uuid4()),
             "pid": position_id,
             "atype": "DISCLOSURE",
             "sev": severity,
-            "title": report_name,
+            "title": f"[{position['company_name']}] {report_name}",
             "body": f"접수번호: {rcept_no}",
             "url": dart_url,
-            "cat": datetime.now(),
+            "meta": json.dumps({"eventAt": event_at}),
+            "cat": utcnow(),
         },
     )
 
@@ -163,74 +192,6 @@ async def save_disclosure_and_alert(session, position_id: str, disclosure: dict,
     print(f"[DART] 공시 저장: {report_name} [{severity}]")
 
     return disc_id
-
-
-async def handle_conversion_price_adjustment(session, position: dict, disc_id: str, content: str):
-    """전환가액 조정 공시 처리 — 현재 전환가 자동 업데이트"""
-    parsed = parse_conversion_price_adjustment(content)
-    if not parsed or "new_price" not in parsed:
-        print(f"[DART] 전환가 파싱 실패: position={position['id']}")
-        return
-
-    # 회차 매칭
-    if parsed.get("series_number") and position["series_number"]:
-        if parsed["series_number"] != position["series_number"]:
-            print(f"[DART] 회차 불일치: 공시={parsed['series_number']}, 포지션={position['series_number']}")
-            return
-
-    old_price = position["current_conversion_price"]
-    new_price = parsed["new_price"]
-
-    if old_price == new_price:
-        return  # 변화 없음
-
-    import uuid
-
-    # 이력 기록
-    await session.execute(
-        text("""
-            INSERT INTO conversion_price_history
-                (id, position_id, old_price, new_price, adjustment_reason,
-                 source_disclosure_id, adjusted_at, is_automatic)
-            VALUES (:id, :pid, :op, :np, :reason, :did, :at, 1)
-        """),
-        {
-            "id": str(uuid.uuid4()),
-            "pid": position["id"],
-            "op": old_price or 0,
-            "np": new_price,
-            "reason": "전환가액 조정 공시 자동 반영",
-            "did": disc_id,
-            "at": datetime.now(),
-        },
-    )
-
-    # 현재 전환가 업데이트
-    await session.execute(
-        text("UPDATE positions SET current_conversion_price = :np, updated_at = :now WHERE id = :id"),
-        {"np": new_price, "now": datetime.now(), "id": position["id"]},
-    )
-
-    # 🔴 긴급 알림 생성
-    alert_id = str(uuid.uuid4())
-    old_fmt = f"{old_price:,.0f}" if old_price else "미등록"
-    new_fmt = f"{new_price:,.0f}"
-    await session.execute(
-        text("""
-            INSERT INTO alerts (id, position_id, alert_type, severity, title, body, created_at)
-            VALUES (:id, :pid, 'CONVERSION_PRICE_ADJUSTMENT', 'CRITICAL', :title, :body, :cat)
-        """),
-        {
-            "id": alert_id,
-            "pid": position["id"],
-            "title": f"{position['company_name']} 전환가 자동 조정",
-            "body": f"{old_fmt}원 → {new_fmt}원",
-            "cat": datetime.now(),
-        },
-    )
-
-    await session.commit()
-    print(f"[DART] ✅ 전환가 자동 업데이트: {position['company_name']} {old_fmt}→{new_fmt}원")
 
 
 async def poll_disclosures():
@@ -257,36 +218,34 @@ async def poll_disclosures():
                 continue
             processed_tickers.add(ticker)
 
-            corp_code = await get_corp_code(ticker, api_key)
+            # 동일 ticker의 모든 포지션
+            same_ticker_positions = [p for p in positions if p["ticker"] == ticker]
+
+            # 웹앱이 등록·스캔 때 채워 둔 corp_code 를 먼저 쓴다. 예전엔 폴링마다
+            # 티커별 company.json 을 불러, 5분 × 종목 수만큼 DART 일일 한도
+            # (2만 건, 웹앱과 같은 키를 공유)를 소모했다.
+            corp_code = next((p["corp_code"] for p in same_ticker_positions if p["corp_code"]), None)
+            if not corp_code:
+                corp_code = await get_corp_code(ticker, api_key)
             if not corp_code:
                 continue
 
             disclosures = await fetch_new_disclosures(corp_code, api_key)
 
-            # 동일 ticker의 모든 포지션 찾기
-            same_ticker_positions = [p for p in positions if p["ticker"] == ticker]
-
-            for disc in disclosures:
-                report_name = disc.get("report_nm", "")
-                report_type, severity = classify_disclosure(report_name)
-
-                for pos in same_ticker_positions:
-                    disc_id = await save_disclosure_and_alert(
-                        session, pos["id"], disc, report_type, severity
+            try:
+                for disc in disclosures:
+                    report_name = disc.get("report_nm", "")
+                    if is_adjustment_disclosure(report_name):
+                        continue  # 웹앱 process-adjustments 담당 (모듈 docstring 참고)
+                    report_type, severity = classify_disclosure(report_name)
+                    # 같은 공시는 rcept_no UNIQUE 라 티커의 첫 포지션에만 붙는다.
+                    await save_disclosure_and_alert(
+                        session, same_ticker_positions[0], disc, report_type, severity
                     )
-
-                    # 전환가액 조정 공시이면 추가 처리
-                    if report_type == "CONVERSION_PRICE_ADJUSTMENT" and disc_id:
-                        try:
-                            rcept_no = disc.get("rcept_no", "")
-                            async with httpx.AsyncClient(timeout=15) as client:
-                                r = await client.get(
-                                    f"https://dart.fss.or.kr/dsaf001/main.do?rcpNo={rcept_no}"
-                                )
-                                content = r.text
-                            await handle_conversion_price_adjustment(session, pos, disc_id, content)
-                        except Exception as e:
-                            print(f"[DART] 전환가 처리 오류: {e}")
+            except Exception as e:
+                # 세션이 aborted transaction 상태로 남아 다음 티커까지 실패하지 않게.
+                await session.rollback()
+                print(f"[DART] 공시 저장 실패: {ticker} — {e}")
 
             await asyncio.sleep(0.5)  # DART API 요청 제한
 
