@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getDefaultUserId } from "@/lib/defaultUser";
 import { sendTelegramAlert } from "@/lib/telegram";
+import { getAlertList, countUnreadAlerts } from "@/lib/alertsQuery";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -86,7 +87,6 @@ interface IncomingAlert {
 }
 
 export async function GET(req: NextRequest) {
-  const userId = await getDefaultUserId();
   const { searchParams } = new URL(req.url);
   const unreadOnly = searchParams.get("unreadOnly") === "true";
   const countOnly = searchParams.get("countOnly") === "true";
@@ -96,30 +96,11 @@ export async function GET(req: NextRequest) {
   // GET 진입 때에도 정리 — 단, 응답을 막지 않게 fire-and-forget (10분 스로틀).
   cleanupStaleDisclosures().catch(() => {});
 
+  // 읽기 경로라 getDefaultUserId()(upsert) 를 거치지 않는다 — src/lib/alertsQuery.ts
   if (countOnly) {
-    const count = await prisma.alertUserStatus.count({
-      where: { userId, isRead: false },
-    });
-    return NextResponse.json({ count });
+    return NextResponse.json({ count: await countUnreadAlerts() });
   }
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const where: any = unreadOnly
-    ? { userStatuses: { some: { userId, isRead: false } } }
-    : {};
-
-  const alerts = await prisma.alert.findMany({
-    where,
-    include: {
-      position: { select: { id: true, assetName: true, underlyingCompanyName: true } },
-      userStatuses: { where: { userId }, take: 1 },
-    },
-    orderBy: { createdAt: "desc" },
-    skip: (page - 1) * limit,
-    take: limit,
-  });
-
-  return NextResponse.json(alerts);
+  return NextResponse.json(await getAlertList({ unreadOnly, page, limit }));
 }
 
 /**
@@ -283,29 +264,20 @@ export async function PATCH(req: NextRequest) {
   const { alertId, action } = body;
 
   if (action === "read_all") {
+    // 예전엔 상태가 없는 알림마다 create 를 하나씩 트랜잭션에 넣었다 — 알림 N 개면
+    // 쿼리 N 개 (pgbouncer 모드에선 문장 수 × 왕복). createMany + skipDuplicates
+    // (ON CONFLICT DO NOTHING) 한 문장으로 대체. 기존 상태 행은 updateMany 가 읽음 처리.
+    const now = new Date();
     const allAlerts = await prisma.alert.findMany({ select: { id: true } });
-    const existingStatuses = await prisma.alertUserStatus.findMany({
-      where: { userId },
-      select: { alertId: true },
-    });
-    const existingIds = new Set(existingStatuses.map((s) => s.alertId));
-    const newAlerts = allAlerts.filter((a) => !existingIds.has(a.id));
-
     await prisma.$transaction([
       prisma.alertUserStatus.updateMany({
         where: { userId },
-        data: { isRead: true, readAt: new Date() },
+        data: { isRead: true, readAt: now },
       }),
-      ...newAlerts.map((a) =>
-        prisma.alertUserStatus.create({
-          data: {
-            alertId: a.id,
-            userId,
-            isRead: true,
-            readAt: new Date(),
-          },
-        })
-      ),
+      prisma.alertUserStatus.createMany({
+        data: allAlerts.map((a) => ({ alertId: a.id, userId, isRead: true, readAt: now })),
+        skipDuplicates: true,
+      }),
     ]);
     return NextResponse.json({ ok: true });
   }

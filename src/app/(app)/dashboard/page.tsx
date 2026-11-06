@@ -1,5 +1,4 @@
-import { getPositionList } from "@/lib/positionsQuery";
-import { getDashboardAlerts } from "@/lib/dashboardQuery";
+import { getDashboardData } from "@/lib/dashboardQuery";
 import DashboardClient from "./DashboardClient";
 
 // DB 데이터(보유종목·알림)는 서버 렌더에 싣고, 느린 외부 API(네이버 시세,
@@ -10,10 +9,7 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export default async function DashboardPage() {
-  const [positions, alerts] = await Promise.all([
-    getPositionList(true),
-    getDashboardAlerts(20),
-  ]);
+  const { positions, alerts } = await getDashboardData(20);
 
   return <DashboardClient initialPositions={positions} initialAlerts={alerts} />;
 }

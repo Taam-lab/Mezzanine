@@ -47,18 +47,23 @@ const LIST_SELECT = {
   isActive: true,
 } as const;
 
+type PositionListRow = Awaited<ReturnType<typeof positionListQuery>>[number];
+
+/** 배치($transaction)에 넣을 수 있도록 Prisma 쿼리 자체를 돌려준다. */
+export function positionListQuery(active = true) {
+  return prisma.position.findMany({
+    where: { isActive: active },
+    select: LIST_SELECT,
+    orderBy: { createdAt: "desc" },
+  });
+}
+
 /**
  * RSC 페이로드에는 BigInt 를 담을 수 없고 Date 는 직렬화 왕복에서 형태가 흔들리므로
  * 서버에서 문자열로 확정해 넘긴다. (JSON API 응답과 동일한 모양이 되어
  * 클라이언트 쪽 파싱 로직을 그대로 쓸 수 있다.)
  */
-export async function getPositionList(active = true): Promise<PositionListItem[]> {
-  const rows = await prisma.position.findMany({
-    where: { isActive: active },
-    select: LIST_SELECT,
-    orderBy: { createdAt: "desc" },
-  });
-
+export function toPositionListItems(rows: PositionListRow[]): PositionListItem[] {
   return rows.map((p) => ({
     ...p,
     investmentAmount: p.investmentAmount === null ? null : p.investmentAmount.toString(),
@@ -67,4 +72,8 @@ export async function getPositionList(active = true): Promise<PositionListItem[]
     putOptionStartDate: p.putOptionStartDate ? p.putOptionStartDate.toISOString() : null,
     putOptionEndDate: p.putOptionEndDate ? p.putOptionEndDate.toISOString() : null,
   }));
+}
+
+export async function getPositionList(active = true): Promise<PositionListItem[]> {
+  return toPositionListItems(await positionListQuery(active));
 }

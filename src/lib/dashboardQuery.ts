@@ -1,4 +1,9 @@
 import { prisma } from "@/lib/prisma";
+import {
+  positionListQuery,
+  toPositionListItems,
+  type PositionListItem,
+} from "@/lib/positionsQuery";
 
 /**
  * 대시보드가 첫 화면에 필요로 하는 DB 데이터.
@@ -25,8 +30,8 @@ export interface DashboardAlert {
  * 페이지 렌더 경로에 불필요한 쓰기 왕복을 추가한다. 대시보드는 읽음/안읽음
  * 상태를 쓰지 않으므로 userStatuses 조인도 생략.
  */
-export async function getDashboardAlerts(limit = 20): Promise<DashboardAlert[]> {
-  const rows = await prisma.alert.findMany({
+function dashboardAlertsQuery(limit: number) {
+  return prisma.alert.findMany({
     select: {
       id: true,
       title: true,
@@ -38,9 +43,26 @@ export async function getDashboardAlerts(limit = 20): Promise<DashboardAlert[]> 
     orderBy: { createdAt: "desc" },
     take: limit,
   });
+}
 
-  return rows.map((a) => ({
-    ...a,
-    createdAt: a.createdAt.toISOString(),
-  }));
+/**
+ * 대시보드 첫 화면 데이터(활성 종목 + 최근 알림)를 한 번에.
+ *
+ * 두 쿼리를 Promise.all 로 날려도 DATABASE_URL 의 connection_limit=1 때문에 직렬이고,
+ * pgbouncer=true 모드는 쿼리마다 BEGIN/DEALLOCATE/COMMIT 을 따로 감싼다 (8문장).
+ * 배치 $transaction 으로 묶으면 그 래핑을 한 번만 해서 5문장이 된다
+ * (로컬 100ms RTT 기준 1.1s → 0.8s).
+ */
+export async function getDashboardData(alertLimit = 20): Promise<{
+  positions: PositionListItem[];
+  alerts: DashboardAlert[];
+}> {
+  const [positionRows, alertRows] = await prisma.$transaction([
+    positionListQuery(true),
+    dashboardAlertsQuery(alertLimit),
+  ]);
+  return {
+    positions: toPositionListItems(positionRows),
+    alerts: alertRows.map((a) => ({ ...a, createdAt: a.createdAt.toISOString() })),
+  };
 }
