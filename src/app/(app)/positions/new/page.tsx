@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, Suspense } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
+import { useNavigateFresh } from "@/lib/useNavigateFresh";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
@@ -29,7 +30,7 @@ interface ParseResult {
 }
 
 function NewPositionContent() {
-  const router = useRouter();
+  const { navigateFresh, navigating } = useNavigateFresh();
   const searchParams = useSearchParams();
   const [tab, setTab] = useState<TabMode>(
     (searchParams.get("mode") as TabMode) || "manual"
@@ -107,7 +108,8 @@ function NewPositionContent() {
         alert(result.error || "저장에 실패했습니다.");
         return;
       }
-      router.push(`/positions/${result.id}`);
+      // 목록이 30초 라우터 캐시에 새 종목 없이 남아 있지 않도록 비우고 이동한다.
+      navigateFresh(`/positions/${result.id}`);
     } finally {
       setSaving(false);
     }
@@ -571,7 +573,7 @@ function NewPositionContent() {
             <Link href="/positions">
               <Button variant="outline">취소</Button>
             </Link>
-            <Button type="submit" variant="primary" loading={saving}>
+            <Button type="submit" variant="primary" loading={saving || navigating}>
               종목 저장
             </Button>
           </div>

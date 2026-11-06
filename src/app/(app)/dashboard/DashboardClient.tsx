@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import {
@@ -19,6 +20,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { formatPercent, formatDateTime, formatKRWShort, SEVERITY_LABEL } from "@/lib/utils";
+import { notifyAlertsChanged } from "@/lib/alertEvents";
 
 interface DashboardStats {
   totalPositions: number;
@@ -211,6 +213,7 @@ export default function DashboardClient({
   initialPositions: PositionSlim[];
   initialAlerts: DbAlertItem[];
 }) {
+  const router = useRouter();
   const [stats, setStats] = useState<DashboardStats | null>(() =>
     initialPositions.length > 0
       ? { totalPositions: initialPositions.length, topRisers: [], topFallers: [] }
@@ -228,11 +231,19 @@ export default function DashboardClient({
   const [positions, setPositions] = useState<PositionSlim[]>(initialPositions);
   const [livePrices, setLivePrices] = useState<Record<string, number>>({});
 
+  // 헤더 뱃지 재계산 + 30초 라우터 캐시에 남은 옛 대시보드(삭제한 알림 포함) 폐기.
+  // 화면 state 는 이미 지웠으므로 refresh 로 props 가 바뀌어도 보이는 건 그대로다.
+  function afterAlertsDeleted() {
+    notifyAlertsChanged();
+    router.refresh();
+  }
+
   async function deleteAlert(alertId: string) {
     try {
       const res = await fetch(`/api/alerts?id=${alertId}`, { method: "DELETE" });
       if (!res.ok) return;
       setAlertList((prev) => prev.filter((a) => a.id !== alertId));
+      afterAlertsDeleted();
     } catch {
       // ignore
     }
@@ -244,6 +255,7 @@ export default function DashboardClient({
       const res = await fetch("/api/alerts?all=true", { method: "DELETE" });
       if (!res.ok) return;
       setAlertList([]);
+      afterAlertsDeleted();
     } catch {
       // ignore
     }
@@ -481,7 +493,12 @@ export default function DashboardClient({
               dedupWithinMinutes: 60,
             })),
           }),
-        }).catch(() => {});
+        })
+          .then((r) => r.json())
+          .then((d: { created?: number }) => {
+            if (d?.created) notifyAlertsChanged();
+          })
+          .catch(() => {});
       }
 
       // Step 3: 뉴스/공시 — 힌트로 이미 시작한 preFeedPromise 재사용, 없으면 지금 시작
@@ -570,7 +587,12 @@ export default function DashboardClient({
                   eventAt: a.isoDate,
                 })),
               }),
-            }).catch(() => {});
+            })
+              .then((r) => r.json())
+              .then((d: { created?: number }) => {
+                if (d?.created) notifyAlertsChanged();
+              })
+              .catch(() => {});
           }
         })
         .catch(() => {})

@@ -1,14 +1,11 @@
 import { Card } from "@/components/ui/Card";
+import { Shimmer } from "@/components/ui/Skeleton";
 
 /**
  * page.tsx 가 force-dynamic + await Prisma 이므로 Suspense 경계가 없으면
  * DB 응답까지 흰 화면이 나온다. loading.tsx 가 그 경계 역할을 해서
  * 사이드바/헤더/표 골격을 즉시 흘려보낸다.
  */
-function Shimmer({ className = "" }: { className?: string }) {
-  return <div className={`animate-pulse rounded bg-gray-200 ${className}`} />;
-}
-
 export default function PositionsLoading() {
   return (
     <div className="space-y-5">
