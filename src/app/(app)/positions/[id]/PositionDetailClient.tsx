@@ -44,6 +44,33 @@ const PriceChart = dynamic(() => import("@/components/charts/PriceChart"), {
   ),
 });
 
+/** /api/positions/[id]/feed 응답 — DART·네이버·Google News 실시간 조회 결과 */
+interface LiveDisclosure {
+  title: string;
+  url: string;
+  isoDate: string; // YYYY-MM-DD (KST 접수일)
+  rcpNo: string | null;
+  severity: "CRITICAL" | "WARNING" | "INFO";
+}
+interface LiveNews {
+  title: string;
+  url: string;
+  date: string; // 표시용 "YYYY.MM.DD HH:mm" (KST)
+  isoDate: string;
+  source: string | null;
+}
+
+/** 공시 URL 의 접수번호 (DB 행과 실시간 조회 결과를 합칠 때 키) */
+function rcpNoOf(url: string | null | undefined): string | null {
+  return url?.match(/rcpNo=(\d+)/i)?.[1] ?? null;
+}
+
+/** ISO 시각 → KST 날짜 "YYYY-MM-DD" (서버·브라우저 타임존과 무관) */
+function kstDay(iso: string): string {
+  const t = new Date(iso).getTime();
+  return Number.isNaN(t) ? iso.slice(0, 10) : new Date(t + 9 * 3600_000).toISOString().slice(0, 10);
+}
+
 interface LivePrice {
   price: number;
   changeRate: number;
@@ -185,6 +212,30 @@ export default function PositionDetailClient({ position }: { position: PositionD
 
   const ticker = position.underlyingTicker;
 
+  // 공시·뉴스는 화면이 뜬 뒤 따로 받는다 (외부 API 라 서버 렌더를 막지 않게).
+  // DB 에는 전환가 조정 공시와 워커가 넣은 당일 공시 정도만 있어서, 이걸 안 받으면
+  // 두 카드가 거의 항상 비어 있었다.
+  const [feed, setFeed] = useState<{ disclosures: LiveDisclosure[]; news: LiveNews[] } | null>(
+    null,
+  );
+  const [feedFailed, setFeedFailed] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    setFeed(null);
+    setFeedFailed(false);
+    fetch(`/api/positions/${position.id}/feed`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((d: { disclosures?: LiveDisclosure[]; news?: LiveNews[] }) => {
+        if (!cancelled) setFeed({ disclosures: d.disclosures ?? [], news: d.news ?? [] });
+      })
+      .catch(() => {
+        if (!cancelled) setFeedFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [position.id]);
+
   // save: 이 조회를 DB 스냅샷으로도 남길지. 화면 진입 때 한 번만 남기고
   // 60초 자동 갱신·수동 새로고침은 시세만 받는다.
   async function refreshPrice(t: string, save = false) {
@@ -226,6 +277,62 @@ export default function PositionDetailClient({ position }: { position: PositionD
     currentPrice && position.currentConversionPrice
       ? (currentPrice / position.currentConversionPrice) * 100
       : null;
+
+  // 공시 타임라인 = 실시간 조회(최근 6개월) + DB 행, 접수번호로 합친다.
+  // 같은 공시면 날짜는 실시간 쪽(접수일), 중요도는 DB 쪽(전환가 조정 등 처리 결과)을 쓴다.
+  const timeline = (() => {
+    type Item = { key: string; title: string; severity: string; day: string; url: string | null };
+    const byRcp = new Map<string, Item>();
+    const items: Item[] = [];
+    for (const d of feed?.disclosures ?? []) {
+      const item: Item = {
+        key: d.rcpNo ?? d.url,
+        title: d.title,
+        severity: d.severity,
+        day: d.isoDate.slice(0, 10),
+        url: d.url,
+      };
+      items.push(item);
+      if (d.rcpNo) byRcp.set(d.rcpNo, item);
+    }
+    for (const d of position.disclosures) {
+      const rcp = rcpNoOf(d.dartUrl);
+      const live = rcp ? byRcp.get(rcp) : undefined;
+      if (live) {
+        live.severity = d.severity;
+        continue;
+      }
+      items.push({
+        key: d.id,
+        title: d.reportName,
+        severity: d.severity,
+        day: kstDay(d.filedAt),
+        url: d.dartUrl,
+      });
+    }
+    return items.sort((a, b) => (a.day < b.day ? 1 : a.day > b.day ? -1 : a.key < b.key ? 1 : -1));
+  })();
+
+  const newsList = (() => {
+    const liveUrls = new Set((feed?.news ?? []).map((n) => n.url));
+    return [
+      ...(feed?.news ?? []).map((n) => ({
+        key: n.url,
+        title: n.title,
+        url: n.url,
+        meta: [n.source, n.date].filter(Boolean).join(" · "),
+      })),
+      ...position.newsItems
+        .filter((n) => !liveUrls.has(n.sourceUrl))
+        .map((n) => ({
+          key: n.id,
+          title: n.title,
+          url: n.sourceUrl,
+          meta: [n.source, formatDateTime(n.publishedAt)].filter(Boolean).join(" · "),
+        })),
+    ];
+  })();
+  const feedLoading = feed === null && !feedFailed;
 
   const chartData = position.priceSnapshots
     .slice(0, 30)
@@ -616,14 +723,23 @@ export default function PositionDetailClient({ position }: { position: PositionD
           <Card>
             <CardHeader>
               <CardTitle>공시 타임라인</CardTitle>
+              <span className="text-xs text-gray-400">
+                {feedLoading ? "불러오는 중..." : feedFailed ? "실시간 조회 실패" : "최근 6개월"}
+              </span>
             </CardHeader>
             <CardContent>
-              {position.disclosures.length === 0 ? (
-                <p className="text-sm text-gray-400 text-center py-4">공시 없음</p>
+              {timeline.length === 0 ? (
+                <p className="text-sm text-gray-400 text-center py-4">
+                  {feedLoading
+                    ? "공시를 불러오는 중..."
+                    : feedFailed
+                      ? "공시를 불러오지 못했습니다."
+                      : "최근 6개월 공시 없음"}
+                </p>
               ) : (
-                <div className="space-y-2">
-                  {position.disclosures.map((d) => (
-                    <div key={d.id} className="flex items-start gap-3 text-sm">
+                <div className="space-y-2 max-h-[480px] overflow-y-auto">
+                  {timeline.map((d) => (
+                    <div key={d.key} className="flex items-start gap-3 text-sm">
                       <Badge
                         variant={
                           d.severity === "CRITICAL"
@@ -634,18 +750,23 @@ export default function PositionDetailClient({ position }: { position: PositionD
                         }
                         className="mt-0.5 flex-shrink-0"
                       >
-                        {SEVERITY_LABEL[d.severity]}
+                        {SEVERITY_LABEL[d.severity] ?? d.severity}
                       </Badge>
                       <div className="flex-1 min-w-0">
-                        <p className="text-gray-900 truncate">{d.reportName}</p>
-                        <p className="text-xs text-gray-400">{formatDateTime(d.filedAt)}</p>
+                        <p className="text-gray-900 truncate" title={d.title}>
+                          {d.title}
+                        </p>
+                        <p className="text-xs text-gray-400 tabular-nums">
+                          {d.day.replace(/-/g, ".")}
+                        </p>
                       </div>
-                      {d.dartUrl && (
+                      {d.url && (
                         <a
-                          href={d.dartUrl}
+                          href={d.url}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="text-gray-400 hover:text-gray-600 flex-shrink-0"
+                          aria-label="공시 원문 보기"
                         >
                           <ExternalLink className="h-3.5 w-3.5" />
                         </a>
@@ -661,24 +782,33 @@ export default function PositionDetailClient({ position }: { position: PositionD
           <Card>
             <CardHeader>
               <CardTitle>뉴스 피드</CardTitle>
+              {(feedLoading || feedFailed) && (
+                <span className="text-xs text-gray-400">
+                  {feedLoading ? "불러오는 중..." : "실시간 조회 실패"}
+                </span>
+              )}
             </CardHeader>
             <CardContent>
-              {position.newsItems.length === 0 ? (
-                <p className="text-sm text-gray-400 text-center py-4">관련 뉴스 없음</p>
+              {newsList.length === 0 ? (
+                <p className="text-sm text-gray-400 text-center py-4">
+                  {feedLoading
+                    ? "뉴스를 불러오는 중..."
+                    : feedFailed
+                      ? "뉴스를 불러오지 못했습니다."
+                      : "관련 뉴스 없음"}
+                </p>
               ) : (
-                <div className="space-y-3">
-                  {position.newsItems.map((n) => (
+                <div className="space-y-3 max-h-[480px] overflow-y-auto">
+                  {newsList.map((n) => (
                     <a
-                      key={n.id}
-                      href={n.sourceUrl}
+                      key={n.key}
+                      href={n.url}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="block hover:bg-gray-50 -mx-2 px-2 py-1 rounded-lg"
                     >
                       <p className="text-sm text-gray-900 hover:text-[#0A2A5E]">{n.title}</p>
-                      <p className="text-xs text-gray-400 mt-0.5">
-                        {n.source} · {formatDateTime(n.publishedAt)}
-                      </p>
+                      <p className="text-xs text-gray-400 mt-0.5">{n.meta}</p>
                     </a>
                   ))}
                 </div>
