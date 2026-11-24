@@ -270,3 +270,49 @@ model SystemSetting {
 
   @@map("system_settings")
 }
+
+// ─── 코벤펀드 (코스닥벤처펀드) ───────────────────────────────────────────────
+// 월말마다 오는 신탁재산명세부를 업로드해 펀드별 보유종목·보유금액·평가금액을 본다.
+// 이력은 두지 않는다 — 펀드마다 가장 최근 명세부 한 장만 남고, 새 명세부를 올리면
+// 그 펀드의 보유종목을 지우고 새로 넣는다.
+
+model VentureFund {
+  id             String   @id @default(cuid())
+  name           String   @unique
+  manager        String? // 운용사 (명세부에 있으면 채움)
+  fundCode       String?  @map("fund_code") // 명세부상의 펀드코드 — 다음 달 업로드 때 같은 펀드를 찾는 데 쓴다
+  baseDate       DateTime @map("base_date") @db.Date // 명세부 기준일
+  nav            BigInt? // 순자산
+  navPerUnit     Float?   @map("nav_per_unit") // 기준가
+  sourceFormat   String   @map("source_format") // TWO_LINE | FLAT
+  sourceFileName String?  @map("source_file_name")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  holdings VentureFundHolding[]
+
+  @@map("venture_funds")
+}
+
+model VentureFundHolding {
+  id                String    @id @default(cuid())
+  fundId            String    @map("fund_id")
+  seq               Int // 명세부에 적힌 순서
+  assetClass        String    @map("asset_class") // STOCK | MEZZ | BOND | CASH | DERIV | OTHER
+  assetClassRaw     String    @map("asset_class_raw") // 명세부 원문 (주식, 국내채권, 매입REPO ...)
+  category          String? // 구분/자산분류 원문 (등록주식KOSDAQ, 사모_회사채 ...)
+  mezzType          String?   @map("mezz_type") // CB | EB | BW
+  name              String
+  code              String? // ISIN 등 종목코드
+  quantity          Float? // 주수 / 액면
+  price             Float? // 종가 / 평가단가
+  acquisitionAmount BigInt?   @map("acquisition_amount") // 취득원가 (= 보유금액)
+  bookAmount        BigInt?   @map("book_amount") // 장부가
+  marketValue       BigInt    @map("market_value") // 평가금액 (부채성 항목은 음수)
+  maturityDate      DateTime? @map("maturity_date") @db.Date
+
+  fund VentureFund @relation(fields: [fundId], references: [id], onDelete: Cascade)
+
+  @@index([fundId, seq])
+  @@map("venture_fund_holdings")
+}
