@@ -7,10 +7,14 @@
  * 운용사마다 명세부 양식이 달라서 두 계열을 지원한다. 열 위치가 아니라 헤더 이름으로
  * 열을 찾으므로 열 순서·시작 열이 달라도 읽힌다.
  *
- *  - TWO_LINE "신탁재산 통합 명세부" (마스터자산운용 .xlsx, 비엔비자산운용 .xls)
+ *  - TWO_LINE "신탁재산 통합 명세부" (마스터·GVA .xlsx, 비엔비·수성 .xls)
  *    한 종목이 두 줄. 헤더도 두 줄이다 — 윗줄 "자산구분/펀드/구분/종목/…/장부평가액",
- *    아랫줄 "운용역명/펀드명/발행기관/종목명/…/취득가/손익/시가평가액".
- *    한 파일에 여러 펀드가 있을 수 있어 펀드코드별로 나눈다. 순자산은 "NAV(:)" 줄.
+ *    아랫줄 "운용역명/펀드명/발행기관/종목명/…/취득가/손익/시가평가액" (사이에 빈 줄이
+ *    있을 수 있다). 한 파일에 여러 펀드가 있을 수 있어 펀드코드별로 나눈다.
+ *    순자산은 "NAV(:)" 줄.
+ *
+ *  한 파일에 여러 시트가 있으면 시트마다 읽은 뒤, 같은 펀드의 중복 시트(GVA의 CSV판)와
+ *  운용펀드 수익증권만 든 클래스 펀드(GVA Class C)는 뺀다.
  *
  *  - FLAT 한 종목이 한 줄인 표 (라이노스 Alliance1, 씨스퀘어 "총괄명세부")
  *    "소계"/"Total" 줄은 건너뛴다. 열 이름이 운용사마다 달라 후보 이름을 둔다.
@@ -189,6 +193,8 @@ function classify(
   if (/REPO|현금|예금|예치|콜론|유동|단기/i.test(r)) return { assetClass: "CASH", mezzType: null };
   // 명세부가 주식과 따로 분류한 ETF·수익증권 (예: TIGER 단기통안채 — 유동성 관리용)
   if (/^(ETF|수익증권)$/i.test(r)) return { assetClass: "OTHER", mezzType: null };
+  // "차입"(수성): 빌려 온 주식. 갚아야 할 부채와 짝이라 펀드의 주식 보유로 보지 않는다.
+  if (/차입|대차/.test(r)) return { assetClass: "OTHER", mezzType: null };
   // 전자단기사채는 만기 한두 달짜리라 사실상 현금성.
   if (/전단채/.test(r) || /\(단\)\s*$/.test(name)) return { assetClass: "CASH", mezzType: null };
   if (/채권|사채/.test(r)) {
@@ -266,21 +272,23 @@ function fundCodeFromSheetName(sheet: string): string | null {
 
 function parseTwoLine(s: SheetInput): ParsedStatement[] | null {
   const data = s.data;
+  // 헤더 두 줄 사이에 빈 줄이 끼는 명세부가 있다 (GVA·수성: 7행, 9행).
   let h = -1;
-  for (let r = 0; r < Math.min(data.length - 1, 40); r++) {
-    if (
-      findCol(data[r], "자산구분") >= 0 &&
-      findCol(data[r + 1], "운용역명") >= 0 &&
-      findCol(data[r + 1], "시가평가액") >= 0
-    ) {
-      h = r;
-      break;
+  let h2 = -1;
+  for (let r = 0; r < Math.min(data.length - 1, 40) && h < 0; r++) {
+    if (findCol(data[r], "자산구분") < 0) continue;
+    for (let k = r + 1; k <= r + 3 && k < data.length; k++) {
+      if (findCol(data[k], "운용역명") >= 0 && findCol(data[k], "시가평가액") >= 0) {
+        h = r;
+        h2 = k;
+        break;
+      }
     }
   }
   if (h < 0) return null;
 
   const H1 = data[h];
-  const H2 = data[h + 1];
+  const H2 = data[h2];
   const c = {
     cls: findCol(H1, "자산구분"),
     fundCode: findCol(H1, "펀드"),
@@ -324,7 +332,7 @@ function parseTwoLine(s: SheetInput): ParsedStatement[] | null {
   const navs = new Map<string, { nav: number | null; navPerUnit: number | null }>();
   let lastNavFund: string | null = null;
 
-  for (let r = h + 2; r < data.length; r++) {
+  for (let r = h2 + 1; r < data.length; r++) {
     const row = data[r];
     if (!row) continue;
 
@@ -427,17 +435,17 @@ function parseFlat(s: SheetInput, fileName: string): ParsedStatement | null {
 
   const H = data[h];
   const c = {
-    date: findCol(H, "일자", "기준일", "기준일자"),
+    date: findCol(H, "일자", "기준일", "기준일자", "처리일자"),
     cls: findCol(H, "자산구분"),
     name: findCol(H, "종목명"),
     code: findCol(H, "종목코드", "표준코드"),
-    qty: findCol(H, "수량", "액면수량", "보유수량"),
+    qty: findCol(H, "수량", "액면수량", "보유수량", "주수/계약수/액면"),
     book: findCol(H, "장부가액", "장부평가액", "장부금액"),
     mv: findCol(H, ...FLAT_MV_COLS),
     acq: findCol(H, "취득액", "취득금액", "취득가"),
-    price: findCol(H, "종가", "적용단가", "평가단가"),
-    maturity: findCol(H, "만기일", "상환일"),
-    category: findCol(H, "자산분류", "자산분류체계(L5)", "유가증권종류"),
+    price: findCol(H, "종가", "적용단가", "평가단가", "행사가격/종가"),
+    maturity: findCol(H, "만기일", "상환일", "상환일자"),
+    category: findCol(H, "자산분류", "자산분류체계(L5)", "유가증권종류", "구분"),
     nav: findCol(H, "순자산", "순자산총액"),
     navPerUnit: findCol(H, "기준가격", "기준가"),
     fundName: findCol(H, "펀드명"),
@@ -553,10 +561,28 @@ export function parseVentureFundStatement(fileName: string, sheets: SheetInput[]
   }
   for (const st of statements) st.holdings = mergeLots(st.holdings);
 
-  if (statements.length === 0 && errors.length === 0) {
+  // 한 파일에 같은 펀드가 여러 시트로 들어 있으면(GVA: 명세부 + 같은 내용의 CSV 시트)
+  // 펀드코드·기준일이 같은 것은 처음 읽은 것만 둔다.
+  const seen = new Set<string>();
+  const unique = statements.filter((st) => {
+    const key = `${st.fundCode ?? st.fundName}|${st.baseDate}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  // 클래스 펀드(GVA "Class C")는 같은 파일의 운용펀드 수익증권 한 줄만 들고 있다.
+  // 보유종목이 모두 그 파일의 다른 펀드코드면 빼고 운용펀드만 남긴다.
+  const codes = new Set(unique.map((st) => st.fundCode).filter(Boolean));
+  const result = unique.filter(
+    (st) =>
+      !st.holdings.every((h) => h.code && h.code !== st.fundCode && codes.has(h.code)),
+  );
+
+  if (result.length === 0 && errors.length === 0) {
     errors.push("명세부 양식을 알아보지 못했습니다. 보유종목 표의 헤더(자산구분·종목명·평가액)를 찾을 수 없습니다.");
   }
-  return { statements, errors };
+  return { statements: result, errors };
 }
 
 /** 보유종목 평가금액 합계 (부채성 항목 포함). */
