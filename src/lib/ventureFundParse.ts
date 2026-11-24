@@ -1,20 +1,21 @@
 /**
  * 코벤펀드 신탁재산명세부(.xlsx) 파서.
  *
- * 엑셀을 읽는 부분(read-excel-file)과 분리된 순수 함수라서, 브라우저 업로드 화면과
- * 노드 스크립트가 같은 코드를 쓴다. 입력은 시트별 2차원 셀 배열.
+ * 엑셀을 읽는 부분(SheetJS, .xlsx·.xls)과 분리된 순수 함수라서, 브라우저 업로드 화면과
+ * 노드 스크립트가 같은 코드를 쓴다. 입력은 시트별 2차원 셀 배열 (날짜 셀은 일련번호).
  *
- * 운용사마다 명세부 양식이 달라서 두 가지를 지원한다. 열 위치가 아니라 헤더 이름으로
- * 열을 찾으므로 열 순서가 조금 바뀌어도 읽힌다.
+ * 운용사마다 명세부 양식이 달라서 두 계열을 지원한다. 열 위치가 아니라 헤더 이름으로
+ * 열을 찾으므로 열 순서·시작 열이 달라도 읽힌다.
  *
- *  - TWO_LINE (예: 마스터자산운용 "신탁재산 통합 명세부")
+ *  - TWO_LINE "신탁재산 통합 명세부" (마스터자산운용 .xlsx, 비엔비자산운용 .xls)
  *    한 종목이 두 줄. 헤더도 두 줄이다 — 윗줄 "자산구분/펀드/구분/종목/…/장부평가액",
  *    아랫줄 "운용역명/펀드명/발행기관/종목명/…/취득가/손익/시가평가액".
- *    한 파일에 여러 펀드가 있을 수 있어 펀드코드별로 나눈다. 순자산은 "NAV:" 줄.
+ *    한 파일에 여러 펀드가 있을 수 있어 펀드코드별로 나눈다. 순자산은 "NAV(:)" 줄.
  *
- *  - FLAT (예: 일자/자산구분/종목명/종목코드/수량/…/장부가액/평가액/취득액 표)
- *    한 종목이 한 줄. "소계"/"전체합계" 줄은 건너뛴다. 순자산은 "순자산" 열.
+ *  - FLAT 한 종목이 한 줄인 표 (라이노스 Alliance1, 씨스퀘어 "총괄명세부")
+ *    "소계"/"Total" 줄은 건너뛴다. 열 이름이 운용사마다 달라 후보 이름을 둔다.
  *    펀드명이 파일 안에 없어서 파일명에서 추정하고, 펀드코드는 시트명에서 가져온다.
+ *    기준일 열이 없으면 파일명의 날짜(20261031)를 쓴다. 순자산 열이 없으면 비워 둔다.
  */
 
 /**
@@ -94,18 +95,39 @@ function amount(v: unknown): number | null {
 
 const pad2 = (n: number) => String(n).padStart(2, "0");
 
-/** "2026.10.31", "2026-10-31", Date → "2026-10-31". 그 밖은 null. */
+function ymd(y: number, mo: number, d: number): string | null {
+  if (y < 1900 || y > 2999 || mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+  return `${y}-${pad2(mo)}-${pad2(d)}`;
+}
+
+/** 엑셀 날짜 일련번호(1900 체계)로 볼 범위: 2000-01-01 ~ 2100-12-31. */
+const SERIAL_MIN = 36526;
+const SERIAL_MAX = 73415;
+
+/**
+ * 명세부마다 날짜를 적는 방식이 다르다:
+ *  "2026.10.31" / "2026-10-31" 문자열, 20261031 숫자(비엔비 상환일),
+ *  엑셀 날짜 셀(시트 리더가 일련번호 46326 으로 넘겨준다).
+ * 일련번호를 Date 로 받지 않는 이유: 브라우저(KST)에서 만든 Date 는 자정이 UTC 로
+ * 전날 15시가 되어 하루가 밀린다. 숫자로 받아 UTC 로 직접 계산한다.
+ */
 function toIsoDate(v: unknown): string | null {
   if (v instanceof Date && !Number.isNaN(v.getTime())) {
-    return `${v.getUTCFullYear()}-${pad2(v.getUTCMonth() + 1)}-${pad2(v.getUTCDate())}`;
+    return ymd(v.getUTCFullYear(), v.getUTCMonth() + 1, v.getUTCDate());
   }
-  const m = str(v).match(/^(\d{4})[.\-/](\d{1,2})[.\-/](\d{1,2})/);
-  if (!m) return null;
-  const y = Number(m[1]);
-  const mo = Number(m[2]);
-  const d = Number(m[3]);
-  if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
-  return `${y}-${pad2(mo)}-${pad2(d)}`;
+  if (typeof v === "number" && Number.isFinite(v)) {
+    if (v >= 19000101 && v <= 29991231 && Number.isInteger(v)) {
+      return ymd(Math.floor(v / 10000), Math.floor(v / 100) % 100, v % 100);
+    }
+    if (v >= SERIAL_MIN && v <= SERIAL_MAX) {
+      const d = new Date(Math.round((Math.floor(v) - 25569) * 86400000));
+      return ymd(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
+    }
+    return null;
+  }
+  const s = str(v);
+  const m = s.match(/^(\d{4})[.\-/](\d{1,2})[.\-/](\d{1,2})/) ?? s.match(/^(\d{4})(\d{2})(\d{2})$/);
+  return m ? ymd(Number(m[1]), Number(m[2]), Number(m[3])) : null;
 }
 
 /** 만기일: 예금의 "2999-12-31" 같은 자리채움 값은 버린다. */
@@ -116,10 +138,15 @@ function toMaturity(v: unknown): string | null {
   return y >= 2000 && y < 2200 ? d : null;
 }
 
-function findCol(row: unknown[] | undefined, name: string): number {
+/** 이름들 중 처음 찾은 열. 운용사마다 같은 열을 다르게 부른다 (평가액/적용평가액 등). */
+function findCol(row: unknown[] | undefined, ...names: string[]): number {
   if (!row) return -1;
-  const target = norm(name);
-  return row.findIndex((v) => norm(v) === target);
+  for (const name of names) {
+    const target = norm(name);
+    const i = row.findIndex((v) => norm(v) === target);
+    if (i >= 0) return i;
+  }
+  return -1;
 }
 
 function cell(row: unknown[] | undefined, col: number): unknown {
@@ -159,7 +186,9 @@ function classify(
 ): { assetClass: VfAssetClass; mezzType: string | null } {
   const r = rawClass.replace(/\s+/g, "");
   if (/스왑|선물|옵션|파생/.test(r)) return { assetClass: "DERIV", mezzType: null };
-  if (/REPO|현금|예금|예치|콜론/i.test(r)) return { assetClass: "CASH", mezzType: null };
+  if (/REPO|현금|예금|예치|콜론|유동|단기/i.test(r)) return { assetClass: "CASH", mezzType: null };
+  // 명세부가 주식과 따로 분류한 ETF·수익증권 (예: TIGER 단기통안채 — 유동성 관리용)
+  if (/^(ETF|수익증권)$/i.test(r)) return { assetClass: "OTHER", mezzType: null };
   // 전자단기사채는 만기 한두 달짜리라 사실상 현금성.
   if (/전단채/.test(r) || /\(단\)\s*$/.test(name)) return { assetClass: "CASH", mezzType: null };
   if (/채권|사채/.test(r)) {
@@ -213,7 +242,7 @@ function makeHolding(args: {
 // ─── 파일명 → 펀드명 추정 ──────────────────────────────────────────────────
 
 const FILENAME_NOISE =
-  /신탁재산|통합|명세부|명세서|보유현황|보유종목|종목별|월말|기준|코스닥벤처|코벤/g;
+  /신탁재산|통합|총괄|명세부|명세서|보유현황|보유종목|종목별|월말|기준|코스닥벤처|코벤|\((운용|판매|수탁)\)/g;
 
 export function fundNameFromFileName(fileName: string): string | null {
   let s = fileName.replace(/\.[^.]+$/, "");
@@ -223,12 +252,14 @@ export function fundNameFromFileName(fileName: string): string | null {
   return s || null;
 }
 
-/** 시트명이 펀드코드처럼 생겼으면 그대로 쓴다 ("2205"). "Sheet1" 같은 기본 이름은 제외. */
+/**
+ * 시트명 앞머리가 펀드코드면 쓴다 ("2205", "20007_신탁재산 총괄명세부" → "20007").
+ * "Sheet1" 같은 기본 이름은 제외.
+ */
 function fundCodeFromSheetName(sheet: string): string | null {
-  const s = sheet.trim();
-  if (!/^[0-9A-Za-z_-]{2,20}$/.test(s)) return null;
-  if (/^sheet\d*$/i.test(s)) return null;
-  return s;
+  const m = sheet.trim().match(/^([0-9A-Za-z-]{2,20})(?:_|\s|$)/);
+  if (!m || /^sheet\d*$/i.test(m[1])) return null;
+  return m[1];
 }
 
 // ─── TWO_LINE ───────────────────────────────────────────────────────────────
@@ -277,14 +308,14 @@ function parseTwoLine(s: SheetInput): ParsedStatement[] | null {
     throw new Error(`[${s.sheet}] 필수 열을 찾지 못했습니다: ${missing.join(", ")}`);
   }
 
-  // 머리말: 운용사명, 기준일
+  // 머리말: 운용사명, 기준일 (문자열 "2026.10.31" 이거나 엑셀 날짜 셀)
   let baseDate: string | null = null;
   let manager: string | null = null;
   for (let r = 0; r < h; r++) {
-    for (const v of data[r]) {
+    for (const v of data[r] ?? []) {
       const t = str(v);
       if (!t) continue;
-      if (!baseDate) baseDate = toIsoDate(t);
+      if (!baseDate) baseDate = toIsoDate(v);
       if (!manager && /운용|자산|투자/.test(t) && !/명세|신탁재산|[:：]/.test(t)) manager = t;
     }
   }
@@ -298,14 +329,15 @@ function parseTwoLine(s: SheetInput): ParsedStatement[] | null {
     if (!row) continue;
 
     // 펀드 합계: "000006 | NAV: | 2,598,350,279 ..." 다음 줄 "기준가: | 1039.37"
-    const navCol = row.findIndex((v) => norm(v) === "NAV:");
+    // (비엔비는 콜론 없이 "NAV" / "기준가"). 펀드코드는 라벨 왼쪽의 첫 값.
+    const navCol = row.findIndex((v) => /^NAV:?$/i.test(norm(v)));
     if (navCol >= 0) {
-      const code = str(row[0]) || str(row[c.fundCode]);
+      const code = row.slice(0, navCol).map(str).find(Boolean) ?? "";
       navs.set(code, { nav: numberRightOf(row, navCol), navPerUnit: null });
       lastNavFund = code;
       continue;
     }
-    const bpCol = row.findIndex((v) => norm(v) === "기준가:");
+    const bpCol = row.findIndex((v) => /^기준가:?$/.test(norm(v)));
     if (bpCol >= 0) {
       const entry = lastNavFund ? navs.get(lastNavFund) : undefined;
       if (entry) entry.navPerUnit = numberRightOf(row, bpCol);
@@ -325,6 +357,7 @@ function parseTwoLine(s: SheetInput): ParsedStatement[] | null {
 
     const price = num(cell(row, c.price));
     const unitPrice = num(cell(line2, c.unitPrice));
+    const bookAmount = amount(cell(row, c.book));
     const fund = funds.get(fundCode) ?? {
       fundName: str(cell(line2, c.fundName)) || null,
       holdings: [],
@@ -338,8 +371,10 @@ function parseTwoLine(s: SheetInput): ParsedStatement[] | null {
         quantity: num(cell(row, c.qty)),
         price: price && price > 0 ? price : unitPrice,
         acquisitionAmount: amount(cell(line2, c.acq)),
-        bookAmount: amount(cell(row, c.book)),
-        marketValue: amount(cell(line2, c.mv)),
+        bookAmount,
+        // 선물·스왑의 "시가평가액" 칸에는 계약금액(명목)이 들어 있다 (비엔비: 알테오젠
+        // 개별선물 매도 9.8억). 실제 가치는 일일정산 후의 장부평가액(보통 0)이다.
+        marketValue: /선물|스왑|옵션/.test(rawClass) ? bookAmount : amount(cell(line2, c.mv)),
         maturity: cell(line2, c.maturity),
       }),
     );
@@ -364,7 +399,16 @@ function parseTwoLine(s: SheetInput): ParsedStatement[] | null {
 
 // ─── FLAT ───────────────────────────────────────────────────────────────────
 
-const SUBTOTAL_NAME = /^(소계|합계|전체합계|총계|자산합계)$/;
+const SUBTOTAL_NAME = /^(소계|합계|전체합계|총계|자산합계|total)$/i;
+
+/**
+ * FLAT 양식의 열 이름. 운용사마다 이름이 달라 후보를 순서대로 찾는다.
+ *  - 라이노스(Alliance1): 일자/수량/장부가액/평가액/취득액/종가/만기일/순자산
+ *  - 씨스퀘어: 액면수량/장부평가액/적용평가액/취득금액/적용단가/상환일 (일자·순자산 없음)
+ * 평가금액은 "적용평가액"을 "시가평가액"보다 먼저 본다 — 예금은 시가평가액이 0 이고
+ * 적용평가액에 잔액이 있다.
+ */
+const FLAT_MV_COLS = ["평가액", "적용평가액", "평가금액", "시가평가액"];
 
 function parseFlat(s: SheetInput, fileName: string): ParsedStatement | null {
   const data = s.data;
@@ -373,7 +417,7 @@ function parseFlat(s: SheetInput, fileName: string): ParsedStatement | null {
     if (
       findCol(data[r], "자산구분") >= 0 &&
       findCol(data[r], "종목명") >= 0 &&
-      findCol(data[r], "평가액") >= 0
+      findCol(data[r], ...FLAT_MV_COLS) >= 0
     ) {
       h = r;
       break;
@@ -383,19 +427,19 @@ function parseFlat(s: SheetInput, fileName: string): ParsedStatement | null {
 
   const H = data[h];
   const c = {
-    date: findCol(H, "일자"),
+    date: findCol(H, "일자", "기준일", "기준일자"),
     cls: findCol(H, "자산구분"),
     name: findCol(H, "종목명"),
-    code: findCol(H, "종목코드"),
-    qty: findCol(H, "수량"),
-    book: findCol(H, "장부가액"),
-    mv: findCol(H, "평가액"),
-    acq: findCol(H, "취득액"),
-    price: findCol(H, "종가"),
-    maturity: findCol(H, "만기일"),
-    category: findCol(H, "자산분류"),
-    nav: findCol(H, "순자산"),
-    navPerUnit: findCol(H, "기준가격"),
+    code: findCol(H, "종목코드", "표준코드"),
+    qty: findCol(H, "수량", "액면수량", "보유수량"),
+    book: findCol(H, "장부가액", "장부평가액", "장부금액"),
+    mv: findCol(H, ...FLAT_MV_COLS),
+    acq: findCol(H, "취득액", "취득금액", "취득가"),
+    price: findCol(H, "종가", "적용단가", "평가단가"),
+    maturity: findCol(H, "만기일", "상환일"),
+    category: findCol(H, "자산분류", "자산분류체계(L5)", "유가증권종류"),
+    nav: findCol(H, "순자산", "순자산총액"),
+    navPerUnit: findCol(H, "기준가격", "기준가"),
     fundName: findCol(H, "펀드명"),
     fundCode: findCol(H, "펀드코드"),
   };

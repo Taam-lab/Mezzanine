@@ -74,20 +74,28 @@ export default function UploadStatementsDialog({
     const newItems: Item[] = [];
     const newErrors: string[] = [];
     try {
-      // 엑셀 리더는 업로드할 때만 받는다 — 페이지 첫 로드 번들에 넣지 않는다.
-      const { default: readXlsxFile } = await import("read-excel-file/browser");
+      // 엑셀 리더(SheetJS)는 업로드할 때만 받는다 — 페이지 첫 로드 번들에 넣지 않는다.
+      // .xlsx 와 구버전 .xls(비엔비 명세부) 둘 다 읽는다.
+      const XLSX = await import("xlsx");
       for (const file of files) {
-        if (!/\.xlsx$/i.test(file.name)) {
-          newErrors.push(
-            /\.xls$/i.test(file.name)
-              ? `${file.name}: 구버전 .xls 파일입니다. 엑셀에서 .xlsx 로 다시 저장해 올려 주세요.`
-              : `${file.name}: .xlsx 파일만 읽을 수 있습니다.`,
-          );
+        if (!/\.xlsx?$/i.test(file.name)) {
+          newErrors.push(`${file.name}: 엑셀 파일(.xlsx, .xls)만 읽을 수 있습니다.`);
           continue;
         }
         try {
-          const sheets = await readXlsxFile(file, { trim: false });
-          const res = parseVentureFundStatement(file.name, sheets as unknown as SheetInput[]);
+          const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
+          // raw: 날짜 셀은 일련번호 그대로 받는다 (Date 로 받으면 KST 에서 하루 밀림 —
+          // 변환은 파서의 toIsoDate 가 UTC 로 한다).
+          const sheets: SheetInput[] = wb.SheetNames.map((name) => ({
+            sheet: name,
+            data: XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[name], {
+              header: 1,
+              raw: true,
+              defval: null,
+              blankrows: true,
+            }),
+          }));
+          const res = parseVentureFundStatement(file.name, sheets);
           for (const e of res.errors) newErrors.push(`${file.name}: ${e}`);
           res.statements.forEach((st, i) => {
             const s = suggestFund(st, funds);
@@ -212,7 +220,7 @@ export default function UploadStatementsDialog({
           >
             <FileSpreadsheet className="h-7 w-7 text-gray-400" />
             <span className="text-sm text-gray-700">
-              {parsing ? "읽는 중..." : "명세부 .xlsx 파일을 끌어다 놓거나 눌러서 선택"}
+              {parsing ? "읽는 중..." : "명세부 엑셀 파일(.xlsx, .xls)을 끌어다 놓거나 눌러서 선택"}
             </span>
             <span className="text-xs text-gray-400">
               여러 파일을 한 번에 올릴 수 있습니다. 펀드마다 최신 명세부 한 장만 남고, 이전
@@ -220,7 +228,7 @@ export default function UploadStatementsDialog({
             </span>
             <input
               type="file"
-              accept=".xlsx"
+              accept=".xlsx,.xls"
               multiple
               className="sr-only"
               onChange={(e) => {

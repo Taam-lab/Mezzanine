@@ -126,7 +126,7 @@ export default function VentureFundsClient({ funds }: { funds: VfFundItem[] }) {
             <FileSpreadsheet className="h-8 w-8 text-gray-300 mx-auto mb-3" />
             <p className="text-gray-700 font-medium">아직 올린 명세부가 없습니다.</p>
             <p className="text-sm text-gray-500 mt-1 mb-5">
-              월말에 받은 신탁재산명세부(.xlsx)를 올리면 펀드별 보유종목·보유금액·평가금액을
+              월말에 받은 신탁재산명세부(.xlsx, .xls)를 올리면 펀드별 보유종목·보유금액·평가금액을
               보여줍니다. 여러 파일을 한 번에 올릴 수 있습니다.
             </p>
             <Button onClick={() => setUploadOpen(true)}>
@@ -244,6 +244,14 @@ function FundOverview({
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums font-medium text-gray-900 whitespace-nowrap">
                     {eok(sum.base)}
+                    {f.nav === null && (
+                      <span
+                        className="ml-0.5 text-gray-400"
+                        title="명세부에 순자산이 없어 평가금액 합계로 표시"
+                      >
+                        *
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums text-gray-700 whitespace-nowrap">
                     {f.navPerUnit === null ? "-" : fmtPrice(f.navPerUnit)}
@@ -411,7 +419,13 @@ function FundDetail({ fund: st, summary }: { fund: VfFundItem; summary: FundSumm
         <Kpi
           label="순자산"
           value={eok(summary.base)}
-          sub={st.navPerUnit === null ? undefined : `기준가 ${fmtPrice(st.navPerUnit)}`}
+          sub={
+            st.nav === null
+              ? "명세부에 순자산 없음 · 평가금액 합계"
+              : st.navPerUnit === null
+                ? undefined
+                : `기준가 ${fmtPrice(st.navPerUnit)}`
+          }
         />
         <Kpi
           label="보유금액 (취득원가)"
