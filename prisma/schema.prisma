@@ -273,43 +273,30 @@ model SystemSetting {
 
 // ─── 코벤펀드 (코스닥벤처펀드) ───────────────────────────────────────────────
 // 월말마다 오는 신탁재산명세부를 업로드해 펀드별 보유종목·보유금액·평가금액을 본다.
-// 명세부 한 장 = VentureFundStatement 하나 (펀드 × 기준일). 같은 펀드·기준일을 다시
-// 올리면 기존 명세부를 지우고 새로 넣는다.
+// 이력은 두지 않는다 — 펀드마다 가장 최근 명세부 한 장만 남고, 새 명세부를 올리면
+// 그 펀드의 보유종목을 지우고 새로 넣는다.
 
 model VentureFund {
-  id        String   @id @default(cuid())
-  name      String   @unique
-  manager   String? // 운용사 (명세부에 있으면 채움)
-  fundCode  String?  @map("fund_code") // 명세부상의 펀드코드 — 다음 달 업로드 때 같은 펀드를 찾는 데 쓴다
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-  statements VentureFundStatement[]
-
-  @@map("venture_funds")
-}
-
-model VentureFundStatement {
   id             String   @id @default(cuid())
-  fundId         String   @map("fund_id")
-  baseDate       DateTime @map("base_date") @db.Date
+  name           String   @unique
+  manager        String? // 운용사 (명세부에 있으면 채움)
+  fundCode       String?  @map("fund_code") // 명세부상의 펀드코드 — 다음 달 업로드 때 같은 펀드를 찾는 데 쓴다
+  baseDate       DateTime @map("base_date") @db.Date // 명세부 기준일
   nav            BigInt? // 순자산
   navPerUnit     Float?   @map("nav_per_unit") // 기준가
   sourceFormat   String   @map("source_format") // TWO_LINE | FLAT
   sourceFileName String?  @map("source_file_name")
-  uploadedAt     DateTime @default(now()) @map("uploaded_at")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
 
-  fund     VentureFund          @relation(fields: [fundId], references: [id], onDelete: Cascade)
   holdings VentureFundHolding[]
 
-  @@unique([fundId, baseDate])
-  @@index([baseDate])
-  @@map("venture_fund_statements")
+  @@map("venture_funds")
 }
 
 model VentureFundHolding {
   id                String    @id @default(cuid())
-  statementId       String    @map("statement_id")
+  fundId            String    @map("fund_id")
   seq               Int // 명세부에 적힌 순서
   assetClass        String    @map("asset_class") // STOCK | MEZZ | BOND | CASH | DERIV | OTHER
   assetClassRaw     String    @map("asset_class_raw") // 명세부 원문 (주식, 국내채권, 매입REPO ...)
@@ -324,8 +311,8 @@ model VentureFundHolding {
   marketValue       BigInt    @map("market_value") // 평가금액 (부채성 항목은 음수)
   maturityDate      DateTime? @map("maturity_date") @db.Date
 
-  statement VentureFundStatement @relation(fields: [statementId], references: [id], onDelete: Cascade)
+  fund VentureFund @relation(fields: [fundId], references: [id], onDelete: Cascade)
 
-  @@index([statementId, seq])
+  @@index([fundId, seq])
   @@map("venture_fund_holdings")
 }

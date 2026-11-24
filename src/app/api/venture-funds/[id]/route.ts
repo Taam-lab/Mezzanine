@@ -45,3 +45,19 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     );
   }
 }
+
+/** 펀드 삭제 (청산된 펀드, 잘못 올린 명세부 정리). 보유종목은 FK cascade 로 같이 지워진다. */
+export async function DELETE(_req: NextRequest, { params }: { params: { id: string } }) {
+  try {
+    const { count } = await prisma.ventureFund.deleteMany({ where: { id: params.id } });
+    if (count === 0) return NextResponse.json({ error: "Not Found" }, { status: 404 });
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    console.error("[venture-funds DELETE]", err);
+    const detail = err instanceof Error ? err.message : String(err);
+    return NextResponse.json(
+      { error: `서버 오류가 발생했습니다: ${detail.slice(0, 300)}` },
+      { status: 500 },
+    );
+  }
+}

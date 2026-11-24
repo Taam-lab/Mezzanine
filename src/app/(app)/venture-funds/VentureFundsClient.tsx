@@ -7,13 +7,8 @@ import { FileSpreadsheet, Pencil, Trash2, Upload } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { cn } from "@/lib/utils";
-import { useNavigateFresh } from "@/lib/useNavigateFresh";
 import type { VfAssetClass } from "@/lib/ventureFundParse";
-import type {
-  VentureFundsPageData,
-  VfHoldingItem,
-  VfStatementItem,
-} from "@/lib/ventureFundsQuery";
+import type { VfFundItem, VfHoldingItem } from "@/lib/ventureFundsQuery";
 import UploadStatementsDialog from "./UploadStatementsDialog";
 
 // ─── 표기 ───────────────────────────────────────────────────────────────────
@@ -76,7 +71,7 @@ function emptyBucket(): Bucket {
   return { mv: 0, acq: 0, count: 0 };
 }
 
-function summarize(st: VfStatementItem): FundSummary {
+function summarize(st: VfFundItem): FundSummary {
   const byGroup = { BOND: emptyBucket(), STOCK: emptyBucket(), OTHER: emptyBucket() };
   let totalMv = 0;
   for (const h of st.holdings) {
@@ -102,30 +97,13 @@ function pnlOf(acq: number | null, mv: number): { pnl: number | null; rate: numb
 
 // ─── 화면 ───────────────────────────────────────────────────────────────────
 
-export default function VentureFundsClient({
-  data,
-  initialFundId,
-}: {
-  data: VentureFundsPageData;
-  initialFundId: string | null;
-}) {
+export default function VentureFundsClient({ funds }: { funds: VfFundItem[] }) {
   const router = useRouter();
-  const { navigateFresh } = useNavigateFresh();
   const [uploadOpen, setUploadOpen] = useState(false);
-  const [fundId, setFundId] = useState<string | null>(initialFundId);
+  const [fundId, setFundId] = useState<string | null>(null);
 
-  const { statements, selectedDate, dates } = data;
-  const selected = statements.find((s) => s.fundId === fundId) ?? statements[0] ?? null;
-  const summaries = useMemo(
-    () => new Map(statements.map((s) => [s.id, summarize(s)])),
-    [statements],
-  );
-
-  function changeDate(date: string) {
-    const q = new URLSearchParams({ date });
-    if (selected) q.set("fund", selected.fundId);
-    router.push(`/venture-funds?${q.toString()}`);
-  }
+  const selected = funds.find((f) => f.id === fundId) ?? funds[0] ?? null;
+  const summaries = useMemo(() => new Map(funds.map((f) => [f.id, summarize(f)])), [funds]);
 
   return (
     <div className="space-y-5">
@@ -133,32 +111,16 @@ export default function VentureFundsClient({
         <div>
           <h1 className="text-xl font-bold text-gray-900">코벤펀드</h1>
           <p className="text-xs text-gray-500 mt-1">
-            코스닥벤처펀드 보유종목 · 월말 신탁재산명세부 기준
+            코스닥벤처펀드 보유종목 · 펀드별 최신 신탁재산명세부 기준
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          {dates.length > 0 && selectedDate && (
-            <select
-              value={selectedDate}
-              onChange={(e) => changeDate(e.target.value)}
-              aria-label="기준일"
-              className="h-9 px-3 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-[#0A2A5E] focus:ring-1 focus:ring-[#0A2A5E]"
-            >
-              {dates.map((d) => (
-                <option key={d} value={d}>
-                  기준일 {fmtDate(d)}
-                </option>
-              ))}
-            </select>
-          )}
-          <Button size="sm" onClick={() => setUploadOpen(true)}>
-            <Upload className="h-4 w-4" />
-            명세부 업로드
-          </Button>
-        </div>
+        <Button size="sm" onClick={() => setUploadOpen(true)}>
+          <Upload className="h-4 w-4" />
+          명세부 업로드
+        </Button>
       </div>
 
-      {statements.length === 0 ? (
+      {funds.length === 0 ? (
         <Card className="border-dashed border-2 border-gray-200">
           <div className="text-center py-12 px-4">
             <FileSpreadsheet className="h-8 w-8 text-gray-300 mx-auto mb-3" />
@@ -176,15 +138,15 @@ export default function VentureFundsClient({
       ) : (
         <>
           <FundOverview
-            statements={statements}
+            funds={funds}
             summaries={summaries}
             selectedId={selected?.id ?? null}
-            onSelect={(s) => setFundId(s.fundId)}
+            onSelect={(f) => setFundId(f.id)}
           />
           {selected && (
             <FundDetail
-              key={selected.id}
-              statement={selected}
+              key={`${selected.id}-${selected.baseDate}`}
+              fund={selected}
               summary={summaries.get(selected.id)!}
             />
           )}
@@ -193,12 +155,11 @@ export default function VentureFundsClient({
 
       {uploadOpen && (
         <UploadStatementsDialog
-          funds={data.funds}
-          uploaded={data.uploaded}
+          funds={funds}
           onClose={() => setUploadOpen(false)}
-          onSaved={(date) => {
+          onSaved={() => {
             setUploadOpen(false);
-            navigateFresh(`/venture-funds?date=${date}`);
+            router.refresh();
           }}
         />
       )}
@@ -209,26 +170,26 @@ export default function VentureFundsClient({
 // ─── 펀드 요약 표 ───────────────────────────────────────────────────────────
 
 function FundOverview({
-  statements,
+  funds,
   summaries,
   selectedId,
   onSelect,
 }: {
-  statements: VfStatementItem[];
+  funds: VfFundItem[];
   summaries: Map<string, FundSummary>;
   selectedId: string | null;
-  onSelect: (s: VfStatementItem) => void;
+  onSelect: (f: VfFundItem) => void;
 }) {
   const totals = useMemo(() => {
     let nav = 0;
     const byGroup: Record<ViewGroup, number> = { BOND: 0, STOCK: 0, OTHER: 0 };
-    for (const s of statements) {
-      const sum = summaries.get(s.id)!;
+    for (const f of funds) {
+      const sum = summaries.get(f.id)!;
       nav += sum.base;
       for (const g of VIEW_GROUPS) byGroup[g] += sum.byGroup[g].mv;
     }
     return { nav, byGroup };
-  }, [statements, summaries]);
+  }, [funds, summaries]);
 
   const share = (v: number, base: number) => (base ? (v / base) * 100 : null);
 
@@ -239,6 +200,7 @@ function FundOverview({
           <thead>
             <tr className="border-b border-gray-100 bg-gray-50 text-xs font-semibold text-gray-500">
               <th className="px-4 py-3 text-left whitespace-nowrap">펀드</th>
+              <th className="px-4 py-3 text-left whitespace-nowrap">기준일</th>
               <th className="px-4 py-3 text-right whitespace-nowrap">순자산</th>
               <th className="px-4 py-3 text-right whitespace-nowrap">기준가</th>
               {VIEW_GROUPS.map((g) => (
@@ -250,13 +212,13 @@ function FundOverview({
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-50">
-            {statements.map((s) => {
-              const sum = summaries.get(s.id)!;
-              const active = s.id === selectedId;
+            {funds.map((f) => {
+              const sum = summaries.get(f.id)!;
+              const active = f.id === selectedId;
               return (
                 <tr
-                  key={s.id}
-                  onClick={() => onSelect(s)}
+                  key={f.id}
+                  onClick={() => onSelect(f)}
                   aria-selected={active}
                   className={cn(
                     "cursor-pointer transition-colors",
@@ -272,16 +234,19 @@ function FundOverview({
                         )}
                       />
                       <div>
-                        <p className="font-medium text-gray-900">{s.fundName}</p>
-                        <p className="text-xs text-gray-400">{s.manager ?? "운용사 미기재"}</p>
+                        <p className="font-medium text-gray-900">{f.name}</p>
+                        <p className="text-xs text-gray-400">{f.manager ?? "운용사 미기재"}</p>
                       </div>
                     </div>
+                  </td>
+                  <td className="px-4 py-3 tabular-nums text-gray-700 whitespace-nowrap">
+                    {fmtDate(f.baseDate)}
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums font-medium text-gray-900 whitespace-nowrap">
                     {eok(sum.base)}
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums text-gray-700 whitespace-nowrap">
-                    {s.navPerUnit === null ? "-" : fmtPrice(s.navPerUnit)}
+                    {f.navPerUnit === null ? "-" : fmtPrice(f.navPerUnit)}
                   </td>
                   {VIEW_GROUPS.map((g) => (
                     <ShareCell
@@ -297,10 +262,12 @@ function FundOverview({
               );
             })}
           </tbody>
-          {statements.length > 1 && (
+          {funds.length > 1 && (
             <tfoot>
               <tr className="border-t border-gray-200 bg-gray-50 font-semibold">
-                <td className="px-4 py-3 text-gray-700">합계 {statements.length}개 펀드</td>
+                <td className="px-4 py-3 text-gray-700" colSpan={2}>
+                  합계 {funds.length}개 펀드
+                </td>
                 <td className="px-4 py-3 text-right tabular-nums text-gray-900 whitespace-nowrap">
                   {eok(totals.nav)}
                 </td>
@@ -339,10 +306,10 @@ function ShareCell({ value, share }: { value: number; share: number | null }) {
 
 // ─── 선택한 펀드 ────────────────────────────────────────────────────────────
 
-function FundDetail({ statement: st, summary }: { statement: VfStatementItem; summary: FundSummary }) {
+function FundDetail({ fund: st, summary }: { fund: VfFundItem; summary: FundSummary }) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
-  const [name, setName] = useState(st.fundName);
+  const [name, setName] = useState(st.name);
   const [manager, setManager] = useState(st.manager ?? "");
   const [busy, setBusy] = useState(false);
 
@@ -352,7 +319,7 @@ function FundDetail({ statement: st, summary }: { statement: VfStatementItem; su
   async function saveFund() {
     setBusy(true);
     try {
-      const res = await fetch(`/api/venture-funds/${st.fundId}`, {
+      const res = await fetch(`/api/venture-funds/${st.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, manager: manager.trim() || null }),
@@ -369,11 +336,11 @@ function FundDetail({ statement: st, summary }: { statement: VfStatementItem; su
     }
   }
 
-  async function deleteStatement() {
-    if (!confirm(`"${st.fundName}" ${fmtDate(st.baseDate)} 명세부를 삭제할까요?`)) return;
+  async function deleteFund() {
+    if (!confirm(`"${st.name}" 펀드와 보유종목을 삭제할까요?`)) return;
     setBusy(true);
     try {
-      const res = await fetch(`/api/venture-funds/statements/${st.id}`, { method: "DELETE" });
+      const res = await fetch(`/api/venture-funds/${st.id}`, { method: "DELETE" });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         alert(body.error ?? `삭제 실패 (HTTP ${res.status})`);
@@ -412,7 +379,7 @@ function FundDetail({ statement: st, summary }: { statement: VfStatementItem; su
           </div>
         ) : (
           <div>
-            <h2 className="text-lg font-bold text-gray-900">{st.fundName}</h2>
+            <h2 className="text-lg font-bold text-gray-900">{st.name}</h2>
             <p className="text-xs text-gray-500 mt-0.5">
               {[st.manager, `기준일 ${fmtDate(st.baseDate)}`, st.sourceFileName]
                 .filter(Boolean)
@@ -429,12 +396,12 @@ function FundDetail({ statement: st, summary }: { statement: VfStatementItem; su
             <Button
               size="sm"
               variant="ghost"
-              onClick={deleteStatement}
+              onClick={deleteFund}
               disabled={busy}
               className="text-red-600 hover:bg-red-50"
             >
               <Trash2 className="h-3.5 w-3.5" />
-              명세부 삭제
+              펀드 삭제
             </Button>
           </div>
         )}
@@ -468,7 +435,7 @@ function FundDetail({ statement: st, summary }: { statement: VfStatementItem; su
         />
       </div>
 
-      <HoldingsTable statement={st} summary={summary} />
+      <HoldingsTable fund={st} summary={summary} />
     </div>
   );
 }
@@ -487,7 +454,7 @@ function Kpi({ label, value, sub }: { label: string; value: string; sub?: React.
 
 const TD = "px-4 py-2.5 text-right tabular-nums whitespace-nowrap";
 
-function HoldingsTable({ statement: st, summary }: { statement: VfStatementItem; summary: FundSummary }) {
+function HoldingsTable({ fund: st, summary }: { fund: VfFundItem; summary: FundSummary }) {
   const bonds = useMemo(
     () =>
       st.holdings

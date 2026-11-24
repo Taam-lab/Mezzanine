@@ -23,6 +23,7 @@ interface Item {
 
 const nf = new Intl.NumberFormat("ko-KR");
 const won = (n: number | null) => (n === null ? "-" : nf.format(n));
+const fmtDate = (iso: string) => iso.replace(/-/g, ".");
 
 /**
  * 지난달에 올린 같은 펀드를 찾아 펀드명을 미리 채운다.
@@ -46,15 +47,12 @@ function suggestFund(st: ParsedStatement, funds: VfFundItem[]): { name: string; 
 
 export default function UploadStatementsDialog({
   funds,
-  uploaded,
   onClose,
   onSaved,
 }: {
   funds: VfFundItem[];
-  uploaded: Array<{ fundName: string; baseDate: string }>;
   onClose: () => void;
-  /** 저장한 명세부 중 가장 최근 기준일 */
-  onSaved: (baseDate: string) => void;
+  onSaved: () => void;
 }) {
   const [items, setItems] = useState<Item[]>([]);
   const [errors, setErrors] = useState<string[]>([]);
@@ -122,21 +120,28 @@ export default function UploadStatementsDialog({
   }
 
   const included = items.filter((it) => it.include);
-  const dupKeys = (() => {
+  // 펀드마다 한 장만 저장되므로 같은 펀드명이 두 번 선택되면 막는다.
+  const dupNames = (() => {
     const seen = new Map<string, number>();
     for (const it of included) {
-      const k = `${it.fundName.trim()}|${it.st.baseDate}`;
+      const k = it.fundName.trim();
       seen.set(k, (seen.get(k) ?? 0) + 1);
     }
     return new Set(Array.from(seen.entries()).filter(([, n]) => n > 1).map(([k]) => k));
   })();
-  const missingName = included.some((it) => !it.fundName.trim());
-  const canSave = included.length > 0 && !missingName && dupKeys.size === 0 && !saving;
+  const existingOf = (name: string) => funds.find((f) => f.name === name);
+  // 저장된 것보다 오래된 명세부는 서버가 거절한다 — 미리 표시.
+  const isOlder = (it: Item) => {
+    const ex = existingOf(it.fundName.trim());
+    return !!ex && ex.baseDate > it.st.baseDate;
+  };
+  const blocked = included.some((it) => !it.fundName.trim() || isOlder(it));
+  const canSave = included.length > 0 && !blocked && dupNames.size === 0 && !saving;
 
   async function save() {
     setSaving(true);
     try {
-      const res = await fetch("/api/venture-funds/statements", {
+      const res = await fetch("/api/venture-funds", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -158,8 +163,7 @@ export default function UploadStatementsDialog({
         alert(body.error ?? `저장 실패 (HTTP ${res.status})`);
         return;
       }
-      const latest = included.map((it) => it.st.baseDate).sort().at(-1)!;
-      onSaved(latest);
+      onSaved();
     } catch (e) {
       alert(e instanceof Error ? e.message : "네트워크 오류");
     } finally {
@@ -211,8 +215,8 @@ export default function UploadStatementsDialog({
               {parsing ? "읽는 중..." : "명세부 .xlsx 파일을 끌어다 놓거나 눌러서 선택"}
             </span>
             <span className="text-xs text-gray-400">
-              여러 파일을 한 번에 올릴 수 있습니다. 같은 펀드·기준일 명세부가 이미 있으면 새
-              파일로 바꿉니다.
+              여러 파일을 한 번에 올릴 수 있습니다. 펀드마다 최신 명세부 한 장만 남고, 이전
+              명세부는 지워집니다.
             </span>
             <input
               type="file"
@@ -258,11 +262,8 @@ export default function UploadStatementsDialog({
                 <tbody className="divide-y divide-gray-50">
                   {items.map((it) => {
                     const name = it.fundName.trim();
-                    const known = funds.some((f) => f.name === name);
-                    const overwrite = uploaded.some(
-                      (u) => u.fundName === name && u.baseDate === it.st.baseDate,
-                    );
-                    const dup = it.include && dupKeys.has(`${name}|${it.st.baseDate}`);
+                    const existing = existingOf(name);
+                    const dup = it.include && dupNames.has(name);
                     return (
                       <tr key={it.key} className={cn(!it.include && "opacity-50")}>
                         <td className="px-3 py-2">
@@ -319,13 +320,19 @@ export default function UploadStatementsDialog({
                         </td>
                         <td className="px-3 py-2 whitespace-nowrap text-xs">
                           {dup ? (
-                            <span className="text-red-600">같은 펀드·기준일 중복</span>
+                            <span className="text-red-600">같은 펀드 중복</span>
                           ) : !name ? (
                             <span className="text-red-600">펀드명 필요</span>
-                          ) : overwrite ? (
-                            <span className="text-amber-600">기존 명세부 교체</span>
-                          ) : known ? (
-                            <span className="text-gray-500">기존 펀드</span>
+                          ) : existing && isOlder(it) ? (
+                            <span className="text-red-600">
+                              더 최근 명세부({fmtDate(existing.baseDate)}) 있음
+                            </span>
+                          ) : existing ? (
+                            <span className="text-amber-600">
+                              {existing.baseDate === it.st.baseDate
+                                ? "같은 기준일 명세부 교체"
+                                : `${fmtDate(existing.baseDate)} 명세부 교체`}
+                            </span>
                           ) : (
                             <span className="text-[#0A2A5E] font-medium">새 펀드</span>
                           )}

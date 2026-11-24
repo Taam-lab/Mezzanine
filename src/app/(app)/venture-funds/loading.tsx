@@ -10,10 +10,7 @@ export default function VentureFundsLoading() {
           <Shimmer className="h-6 w-24" />
           <Shimmer className="mt-2 h-3 w-56" />
         </div>
-        <div className="flex items-center gap-2">
-          <Shimmer className="h-9 w-32" />
-          <Shimmer className="h-9 w-28" />
-        </div>
+        <Shimmer className="h-9 w-28" />
       </div>
 
       <Card>
