@@ -31,6 +31,7 @@ import {
 } from "@/lib/utils";
 import dynamic from "next/dynamic";
 import type { PositionDetail } from "@/lib/positionDetailQuery";
+import ExitHistoryCard from "./ExitHistoryCard";
 
 
 // recharts 는 ~110KB. 차트는 스크롤 아래에 있어 첫 페인트에 필요 없으므로
@@ -121,6 +122,16 @@ function nextExerciseWindow(
   if (today < start) return `${formatDate(startIso)} 부터 행사 가능`;
   if (today <= end) return `현재 ~ ${formatDate(endIso)} 까지 행사 가능`;
   return "행사 종료";
+}
+
+/** "20억원" — 부분 Exit 가 있으면 "20억원 (잔여 18억원)". */
+function investmentLabel(p: PositionDetail): string {
+  if (!p.investmentAmount) return "-";
+  const invested = Number(p.investmentAmount);
+  const exited = p.exits.reduce((s, e) => s + Number(e.principalAmount), 0);
+  return exited > 0
+    ? `${formatKRW(invested)} (잔여 ${formatKRW(invested - exited)})`
+    : formatKRW(invested);
 }
 
 /**
@@ -510,7 +521,7 @@ export default function PositionDetailClient({ position }: { position: PositionD
                     ["형태", MEZZANINE_TYPE_LABEL[position.mezzanineType] || position.mezzanineType],
                     ["회차", position.seriesNumber ? `제${position.seriesNumber}회` : "-"],
                     ["투자구분", INVESTMENT_TYPE_LABEL[position.investmentType] || position.investmentType],
-                    ["투자금액", position.investmentAmount ? formatKRW(Number(position.investmentAmount)) : "-"],
+                    ["투자금액", investmentLabel(position)],
                     ["발행일", formatDate(position.issueDate)],
                     ["만기일", formatDate(position.maturityDate)],
                     ["표면금리", position.couponRate !== null ? formatPercent(position.couponRate) : "-"],
@@ -683,6 +694,13 @@ export default function PositionDetailClient({ position }: { position: PositionD
               )}
             </CardContent>
           </Card>
+
+          {/* 부분 Exit */}
+          <ExitHistoryCard
+            positionId={position.id}
+            investmentAmount={position.investmentAmount}
+            exits={position.exits}
+          />
 
           {/* 전환가 조정 이력 */}
           {position.conversionPriceHistory.length > 0 && (

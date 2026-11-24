@@ -77,6 +77,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: { id: stri
   //   ConversionPriceHistory → Position + Disclosure
   //   Disclosure → Position
   //   NewsItem / PriceSnapshot / FinancialSnapshot / RiskCheckResult → Position
+  // (PositionExit 은 FK 가 ON DELETE CASCADE 라 종목과 함께 지워진다.)
   try {
     await prisma.$transaction([
       prisma.alertUserStatus.deleteMany({ where: { alert: { positionId } } }),

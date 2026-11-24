@@ -19,6 +19,8 @@ export interface PositionListItem {
   mezzanineType: string;
   investmentType: string;
   investmentAmount: string | null;
+  /** 부분 Exit 한 원금 합계 (없으면 null). 잔여 원금 = investmentAmount − exitedAmount. */
+  exitedAmount: string | null;
   issueDate: string | null;
   maturityDate: string | null;
   currentConversionPrice: number | null;
@@ -45,6 +47,7 @@ const LIST_SELECT = {
   putOptionEndDate: true,
   putOptionSchedule: true,
   isActive: true,
+  exits: { select: { principalAmount: true } },
 } as const;
 
 type PositionListRow = Awaited<ReturnType<typeof positionListQuery>>[number];
@@ -64,9 +67,13 @@ export function positionListQuery(active = true) {
  * 클라이언트 쪽 파싱 로직을 그대로 쓸 수 있다.)
  */
 export function toPositionListItems(rows: PositionListRow[]): PositionListItem[] {
-  return rows.map((p) => ({
+  return rows.map(({ exits, ...p }) => ({
     ...p,
     investmentAmount: p.investmentAmount === null ? null : p.investmentAmount.toString(),
+    exitedAmount:
+      exits.length === 0
+        ? null
+        : exits.reduce((sum, e) => sum + e.principalAmount, BigInt(0)).toString(),
     issueDate: p.issueDate ? p.issueDate.toISOString() : null,
     maturityDate: p.maturityDate ? p.maturityDate.toISOString() : null,
     putOptionStartDate: p.putOptionStartDate ? p.putOptionStartDate.toISOString() : null,
