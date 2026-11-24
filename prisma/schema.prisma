@@ -78,10 +78,29 @@ model Position {
   financialSnapshots     FinancialSnapshot[]
   riskCheckResults       RiskCheckResult[]
   conversionPriceHistory ConversionPriceHistory[]
+  exits                  PositionExit[]
 
   @@index([isActive, createdAt(sort: Desc)])
   @@index([underlyingTicker, isActive])
   @@map("positions")
+}
+
+/// 부분 Exit 기록. 투자원금 중 일부를 먼저 회수한 건 (예: 20억 중 2억 전환 후 매도).
+/// 잔여 원금 = investmentAmount − Σ principalAmount.
+model PositionExit {
+  id              String   @id @default(cuid())
+  positionId      String   @map("position_id")
+  exitDate        DateTime @map("exit_date") @db.Date
+  principalAmount BigInt   @map("principal_amount") // Exit 한 투자원금 (액면 기준)
+  proceedsAmount  BigInt?  @map("proceeds_amount") // 실제 회수금액 (모르면 비움)
+  method          String? // 전환 후 매도 | 조기상환(풋) | 장외 매각 | 콜(매도청구권) | 만기상환 | 기타
+  note            String?
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  position Position @relation(fields: [positionId], references: [id], onDelete: Cascade)
+
+  @@index([positionId, exitDate])
+  @@map("position_exits")
 }
 
 model ConversionPriceHistory {

@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import {
   formatKRW,
+  formatKRWShort,
   formatPercent,
   formatDate,
   INVESTMENT_TYPE_LABEL,
@@ -35,6 +36,7 @@ interface Position {
   mezzanineType: string;
   investmentType: string;
   investmentAmount: string | null;
+  exitedAmount: string | null;
   issueDate: string | null;
   maturityDate: string | null;
   currentConversionPrice: number | null;
@@ -144,6 +146,12 @@ interface DerivedRow extends Position {
   __changeRate: number | null;
   __parity: number | null;
   __nextPutStart: number | null; // ms epoch, 정렬용
+}
+
+/** 잔여 원금 = 투자금액 − 부분 Exit 원금 합계. 투자금액이 없으면 null. */
+function remainingAmount(p: Pick<Position, "investmentAmount" | "exitedAmount">): number | null {
+  if (!p.investmentAmount) return null;
+  return Number(p.investmentAmount) - Number(p.exitedAmount ?? 0);
 }
 
 /** 정렬 시 null/undefined는 항상 끝으로 밀리게. */
@@ -452,7 +460,7 @@ export default function PositionsClient({
         case "investmentType":
           return p.investmentType;
         case "investmentAmount":
-          return p.investmentAmount ? Number(p.investmentAmount) : null;
+          return remainingAmount(p);
         case "currentPrice":
           return p.__currentPrice;
         case "changeRate":
@@ -752,9 +760,21 @@ export default function PositionsClient({
                         </span>
                       </td>
                       <td className="px-4 py-3 text-right tabular-nums text-sm text-gray-900">
-                        {pos.investmentAmount
-                          ? formatKRW(Number(pos.investmentAmount))
-                          : "-"}
+                        {pos.investmentAmount ? (
+                          <>
+                            {formatKRW(remainingAmount(pos))}
+                            {pos.exitedAmount && (
+                              <p
+                                className="text-xs text-gray-400"
+                                title={`투자원금 ${formatKRW(Number(pos.investmentAmount))} 중 Exit ${formatKRW(Number(pos.exitedAmount))}`}
+                              >
+                                Exit {formatKRWShort(Number(pos.exitedAmount))}
+                              </p>
+                            )}
+                          </>
+                        ) : (
+                          "-"
+                        )}
                       </td>
                       <td
                         className={`px-4 py-3 text-right tabular-nums text-sm font-medium ${

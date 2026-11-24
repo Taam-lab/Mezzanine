@@ -40,6 +40,17 @@ const DETAIL_INCLUDE = {
     },
     orderBy: { adjustedAt: "asc" },
   },
+  exits: {
+    select: {
+      id: true,
+      exitDate: true,
+      principalAmount: true,
+      proceedsAmount: true,
+      method: true,
+      note: true,
+    },
+    orderBy: [{ exitDate: "asc" }, { createdAt: "asc" }],
+  },
 } satisfies Prisma.PositionInclude;
 
 /** 클라이언트로 넘기는 모양 — API JSON 응답과 동일 (BigInt·Date 는 문자열). */
@@ -83,6 +94,15 @@ export interface PositionDetail {
     isAutomatic: boolean;
   }>;
   riskCheckResults: Array<{ checkId: string; status: string; checkedAt: string }>;
+  /** 부분 Exit 기록, 오래된 순. 금액은 원 단위 문자열 (BigInt). */
+  exits: Array<{
+    id: string;
+    exitDate: string;
+    principalAmount: string;
+    proceedsAmount: string | null;
+    method: string | null;
+    note: string | null;
+  }>;
   disclosures: Array<{
     id: string;
     reportName: string;
@@ -141,7 +161,7 @@ export async function getPositionDetail(id: string): Promise<PositionDetail | nu
 /** 수정 폼용 — 관계 없이 종목 행 하나만. */
 export async function getPositionForEdit(
   id: string,
-): Promise<Omit<PositionDetail, "priceSnapshots" | "conversionPriceHistory" | "riskCheckResults" | "disclosures" | "newsItems"> | null> {
+): Promise<Omit<PositionDetail, "priceSnapshots" | "conversionPriceHistory" | "riskCheckResults" | "disclosures" | "newsItems" | "exits"> | null> {
   const row = await prisma.position.findUnique({ where: { id } });
   return row ? toPlain(row) : null;
 }

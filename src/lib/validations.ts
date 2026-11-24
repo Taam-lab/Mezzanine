@@ -118,3 +118,21 @@ export type LoginInput = z.infer<typeof loginSchema>;
 // react-hook-form의 resolver 제네릭과 어긋난다. 폼용은 input 타입, 서버 처리용은 output 타입.
 export type PositionInput = z.input<typeof positionSchema>;
 export type PositionOutput = z.output<typeof positionSchema>;
+
+/** 부분 Exit 기록 (POST /api/positions/[id]/exits). 금액은 원 단위 정수. */
+export const positionExitSchema = z.object({
+  exitDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Exit 일자를 입력하세요."),
+  principalAmount: z
+    .number()
+    .int()
+    .positive("Exit 원금은 0보다 커야 합니다.")
+    .refine(Number.isSafeInteger, "금액이 너무 큽니다."),
+  proceedsAmount: z
+    .number()
+    .int()
+    .nonnegative("회수금액은 0 이상이어야 합니다.")
+    .refine(Number.isSafeInteger, "금액이 너무 큽니다.")
+    .nullable(),
+  method: z.string().trim().max(50).nullable(),
+  note: z.string().trim().max(500).nullable(),
+});

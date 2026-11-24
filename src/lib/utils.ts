@@ -11,12 +11,14 @@ export function formatKRW(amount: number | bigint | null | undefined): string {
   return new Intl.NumberFormat("ko-KR").format(num) + "원";
 }
 
+/** "2억원", "2.5억원", "3,000만원". 억·조는 소수 둘째 자리까지 (2.5억이 "3억"으로 반올림되지 않게). */
 export function formatKRWShort(amount: number | bigint | null | undefined): string {
   if (amount === null || amount === undefined) return "-";
   const num = typeof amount === "bigint" ? Number(amount) : amount;
-  if (Math.abs(num) >= 1_000_000_000_000) return (num / 1_000_000_000_000).toFixed(1) + "조원";
-  if (Math.abs(num) >= 100_000_000) return (num / 100_000_000).toFixed(0) + "억원";
-  if (Math.abs(num) >= 10_000) return (num / 10_000).toFixed(0) + "만원";
+  const dec2 = (n: number) => n.toLocaleString("ko-KR", { maximumFractionDigits: 2 });
+  if (Math.abs(num) >= 1_000_000_000_000) return dec2(num / 1_000_000_000_000) + "조원";
+  if (Math.abs(num) >= 100_000_000) return dec2(num / 100_000_000) + "억원";
+  if (Math.abs(num) >= 10_000) return Math.round(num / 10_000).toLocaleString("ko-KR") + "만원";
   return formatKRW(num);
 }
 
@@ -136,3 +138,28 @@ export const RISK_CHECK_LABELS: Record<string, { name: string; category: string 
   G2: { name: "횡령·배임 발생", category: "거버넌스" },
   G3: { name: "회생절차/파산신청", category: "거버넌스" },
 };
+
+/**
+ * 금액 입력 해석: "200,000,000", "2억", "2.5억", "3천만", "5000만", "1억2천만" → 원.
+ * 해석할 수 없으면 null.
+ */
+export function parseKrwInput(input: string): number | null {
+  const s = input.replace(/[,\s원]/g, "");
+  if (!s) return null;
+  if (/^\d+(\.\d+)?$/.test(s)) return Math.round(Number(s));
+  const m = s.match(/^(?:(\d+(?:\.\d+)?)억)?(?:(\d+(?:\.\d+)?)(천)?만)?$/);
+  if (!m || (!m[1] && !m[2])) return null;
+  const eok = m[1] ? Number(m[1]) * 1e8 : 0;
+  const man = m[2] ? Number(m[2]) * (m[3] ? 1e7 : 1e4) : 0;
+  return Math.round(eok + man);
+}
+
+/** 부분 Exit 방식 (선택 입력). */
+export const EXIT_METHODS = [
+  "전환 후 매도",
+  "조기상환(풋)",
+  "장외 매각",
+  "콜(매도청구권)",
+  "만기상환",
+  "기타",
+] as const;

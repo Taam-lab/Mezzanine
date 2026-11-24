@@ -85,6 +85,7 @@ interface PositionSlim {
   underlyingCompanyName: string;
   currentConversionPrice: number | null;
   investmentAmount: string | null;
+  exitedAmount: string | null;
   putOptionStartDate: string | null;
   putOptionEndDate: string | null;
   putOptionSchedule: string | null;
@@ -785,8 +786,11 @@ export default function DashboardClient({
                           {pos.assetName}
                         </span>
                         <span className="text-xs text-gray-500 tabular-nums">
+                          {/* 부분 Exit 가 있으면 잔여 원금 — 풋을 행사할 수 있는 건 남은 금액이다 */}
                           {pos.investmentAmount
-                            ? formatKRWShort(Number(pos.investmentAmount))
+                            ? formatKRWShort(
+                                Number(pos.investmentAmount) - Number(pos.exitedAmount ?? 0),
+                              )
                             : "-"}
                         </span>
                         <span
