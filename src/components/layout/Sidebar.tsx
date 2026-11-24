@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
   Briefcase,
+  ChartPie,
   Bell,
   Settings,
   Shield,
@@ -19,6 +20,7 @@ import { cn } from "@/lib/utils";
 const NAV_ITEMS = [
   { href: "/dashboard", match: "/dashboard", icon: LayoutDashboard, label: "대시보드" },
   { href: "/positions", match: "/positions", icon: Briefcase, label: "보유 종목" },
+  { href: "/venture-funds", match: "/venture-funds", icon: ChartPie, label: "코벤펀드" },
   { href: "/alerts", match: "/alerts", icon: Bell, label: "알림함" },
   { href: "/settings/notifications", match: "/settings", icon: Settings, label: "설정" },
 ];
