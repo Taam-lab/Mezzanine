@@ -16,7 +16,7 @@
  *  한 파일에 여러 시트가 있으면 시트마다 읽은 뒤, 같은 펀드의 중복 시트(GVA의 CSV판)와
  *  운용펀드 수익증권만 든 클래스 펀드(GVA Class C)는 뺀다.
  *
- *  - FLAT 한 종목이 한 줄인 표 (라이노스 Alliance1, 씨스퀘어 "총괄명세부")
+ *  - FLAT 한 종목이 한 줄인 표 (라이노스 Alliance1, 씨스퀘어 "총괄명세부", 코리아에셋투자증권)
  *    "소계"/"Total" 줄은 건너뛴다. 열 이름이 운용사마다 달라 후보 이름을 둔다.
  *    펀드명이 파일 안에 없어서 파일명에서 추정하고, 펀드코드는 시트명에서 가져온다.
  *    기준일 열이 없으면 파일명의 날짜(20261031)를 쓴다. 순자산 열이 없으면 비워 둔다.
@@ -413,10 +413,34 @@ const SUBTOTAL_NAME = /^(소계|합계|전체합계|총계|자산합계|total)$/
  * FLAT 양식의 열 이름. 운용사마다 이름이 달라 후보를 순서대로 찾는다.
  *  - 라이노스(Alliance1): 일자/수량/장부가액/평가액/취득액/종가/만기일/순자산
  *  - 씨스퀘어: 액면수량/장부평가액/적용평가액/취득금액/적용단가/상환일 (일자·순자산 없음)
+ *  - GVA CSV 시트: 처리일자/주수/계약수/액면/취득가/행사가격/종가/시가평가액/상환일자
+ *  - 코리아에셋투자증권: 기준일/액면/주수/취득금액(기준)/평가금액(기준)/당일종가/만기일
  * 평가금액은 "적용평가액"을 "시가평가액"보다 먼저 본다 — 예금은 시가평가액이 0 이고
  * 적용평가액에 잔액이 있다.
  */
-const FLAT_MV_COLS = ["평가액", "적용평가액", "평가금액", "시가평가액"];
+const FLAT_MV_COLS = ["평가액", "적용평가액", "평가금액", "평가금액(기준)", "시가평가액"];
+
+/** 머리말에 적힌 운용사(위탁사) 이름. 예: "코리아에셋투자증권". */
+function managerFromHeader(data: unknown[][], headerRow: number): string | null {
+  for (let r = 0; r < headerRow; r++) {
+    for (const v of data[r] ?? []) {
+      const t = str(v);
+      if (/(자산운용|투자증권|운용)$/.test(t) && !/[:：]/.test(t)) return t;
+    }
+  }
+  return null;
+}
+
+/** 파일명 속 날짜: "20261031", "2026.10.31", "_261031_" (YYMMDD). */
+function dateFromFileName(fileName: string): string | null {
+  const base = fileName.replace(/\.[^.]+$/, "");
+  const m8 = base.match(/(20\d{2})(\d{2})(\d{2})/);
+  if (m8) return toIsoDate(`${m8[1]}-${m8[2]}-${m8[3]}`);
+  const sep = base.match(/(20\d{2})[.\-](\d{1,2})[.\-](\d{1,2})/);
+  if (sep) return toIsoDate(`${sep[1]}-${sep[2]}-${sep[3]}`);
+  const m6 = base.match(/(?:^|[_\s-])(\d{2})(\d{2})(\d{2})(?=$|[_\s-])/);
+  return m6 ? toIsoDate(`20${m6[1]}-${m6[2]}-${m6[3]}`) : null;
+}
 
 function parseFlat(s: SheetInput, fileName: string): ParsedStatement | null {
   const data = s.data;
@@ -439,17 +463,18 @@ function parseFlat(s: SheetInput, fileName: string): ParsedStatement | null {
     cls: findCol(H, "자산구분"),
     name: findCol(H, "종목명"),
     code: findCol(H, "종목코드", "표준코드"),
-    qty: findCol(H, "수량", "액면수량", "보유수량", "주수/계약수/액면"),
+    qty: findCol(H, "수량", "액면수량", "보유수량", "주수/계약수/액면", "액면/주수"),
     book: findCol(H, "장부가액", "장부평가액", "장부금액"),
     mv: findCol(H, ...FLAT_MV_COLS),
-    acq: findCol(H, "취득액", "취득금액", "취득가"),
-    price: findCol(H, "종가", "적용단가", "평가단가", "행사가격/종가"),
+    acq: findCol(H, "취득액", "취득금액", "취득가", "취득금액(기준)"),
+    price: findCol(H, "종가", "적용단가", "평가단가", "행사가격/종가", "당일종가"),
     maturity: findCol(H, "만기일", "상환일", "상환일자"),
     category: findCol(H, "자산분류", "자산분류체계(L5)", "유가증권종류", "구분"),
     nav: findCol(H, "순자산", "순자산총액"),
     navPerUnit: findCol(H, "기준가격", "기준가"),
     fundName: findCol(H, "펀드명"),
     fundCode: findCol(H, "펀드코드"),
+    position: findCol(H, "포지션"),
   };
 
   let baseDate: string | null = null;
@@ -477,6 +502,9 @@ function parseFlat(s: SheetInput, fileName: string): ParsedStatement | null {
     if (!fundCode) fundCode = str(cell(row, c.fundCode)) || null;
 
     if (!name || !rawClass || SUBTOTAL_NAME.test(name.replace(/\s+/g, ""))) continue;
+    // 팔았지만 결제 전인 주식(코리아에셋 "매도미결제")은 같은 금액이 "주식미수입금"으로도
+    // 잡혀 있다. 이미 판 주식이라 미수금 쪽만 남긴다.
+    if (/매도미결제/.test(str(cell(row, c.position)))) continue;
 
     holdings.push(
       makeHolding({
@@ -495,10 +523,7 @@ function parseFlat(s: SheetInput, fileName: string): ParsedStatement | null {
   }
 
   if (holdings.length === 0) return null;
-  if (!baseDate) {
-    const m = fileName.match(/(20\d{2})(\d{2})(\d{2})/);
-    if (m) baseDate = toIsoDate(`${m[1]}-${m[2]}-${m[3]}`);
-  }
+  if (!baseDate) baseDate = dateFromFileName(fileName);
   if (!baseDate) throw new Error(`[${s.sheet}] 기준일(일자)을 찾지 못했습니다.`);
 
   return {
@@ -507,7 +532,7 @@ function parseFlat(s: SheetInput, fileName: string): ParsedStatement | null {
     baseDate,
     fundCode: fundCode ?? fundCodeFromSheetName(s.sheet),
     fundName: fundName ?? fundNameFromFileName(fileName),
-    manager: null,
+    manager: managerFromHeader(data, h),
     nav,
     navPerUnit,
     holdings,
